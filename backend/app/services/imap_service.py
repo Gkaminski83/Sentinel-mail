@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List
@@ -41,7 +42,18 @@ class IMAPService:
                     subject = str(make_header(decode_header(subject_value))) if subject_value else ""
                     sender = envelope.from_[0]
                     from_addr = f"{sender.mailbox.decode()}@{sender.host.decode()}"
-                    date = parsedate_to_datetime(envelope.date)
+
+                    date_value = envelope.date
+                    if isinstance(date_value, bytes):
+                        date_value = date_value.decode(errors="ignore")
+
+                    if isinstance(date_value, datetime):
+                        date = date_value
+                    elif isinstance(date_value, str):
+                        date = parsedate_to_datetime(date_value)
+                    else:
+                        # IMAP servers normally return str or datetime; fallback prevents crashes if missing
+                        date = datetime.utcnow()
                     all_messages.append(
                         {
                             "id": f"{account['id']}|{msgid}",
