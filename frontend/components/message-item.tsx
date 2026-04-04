@@ -1,5 +1,7 @@
 "use client"
 
+import type { DragEvent, KeyboardEvent } from "react"
+
 import { MessageSummary } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -27,7 +29,7 @@ export function MessageItem({
     minute: "2-digit",
   })
 
-  const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+  const handleDragStart = (event: DragEvent<HTMLDivElement>) => {
     if (!draggableIds || draggableIds.length === 0) {
       return
     }
@@ -41,7 +43,7 @@ export function MessageItem({
       role="button"
       tabIndex={0}
       onClick={() => onSelect(message.id)}
-      onKeyDown={(event) => {
+      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault()
           onSelect(message.id)

@@ -10,10 +10,13 @@ import {
   type Account,
   type MessageSummary,
   ApiError,
+  deleteMessages,
   getAccounts,
   getCurrentAdmin,
   getMessageBody,
   getMessages,
+  markMessagesAsSpam,
+  moveMessages,
 } from "@/lib/api"
 import { clearAuthToken, getAuthToken } from "@/lib/auth"
 
@@ -26,6 +29,8 @@ export default function HomePage() {
   const [messages, setMessages] = useState<MessageSummary[]>([])
   const [messagesLoading, setMessagesLoading] = useState(true)
   const [messagesError, setMessagesError] = useState<string | null>(null)
+  const [messageActionLoading, setMessageActionLoading] = useState(false)
+  const [messageActionError, setMessageActionError] = useState<string | null>(null)
 
   const [currentAdmin, setCurrentAdmin] = useState<string | null>(null)
   const [authChecked, setAuthChecked] = useState(false)
@@ -34,6 +39,7 @@ export default function HomePage() {
   const [activeFolder, setActiveFolder] = useState("inbox")
 
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set())
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set())
 
   const [messageBodies, setMessageBodies] = useState<Record<string, string>>({})
@@ -72,7 +78,7 @@ export default function HomePage() {
     setMessagesLoading(true)
     setMessagesError(null)
     try {
-      const data = await getMessages()
+      const data = await getMessages({ folder: activeFolder })
       setMessages(data)
       setReadMessageIds((prev) => {
         const next = new Set<string>()
@@ -91,7 +97,7 @@ export default function HomePage() {
     } finally {
       setMessagesLoading(false)
     }
-  }, [handleAuthError])
+  }, [handleAuthError, activeFolder])
 
   useEffect(() => {
     const token = getAuthToken()
@@ -125,8 +131,14 @@ export default function HomePage() {
       return
     }
     loadAccounts()
+  }, [authChecked, loadAccounts])
+
+  useEffect(() => {
+    if (!authChecked) {
+      return
+    }
     loadMessages()
-  }, [authChecked, loadAccounts, loadMessages])
+  }, [authChecked, loadMessages])
 
   const selectedAccountId = useMemo(() => {
     if (activeAccountFilter === "all") {
@@ -141,6 +153,25 @@ export default function HomePage() {
     }
     return messages.filter((message) => message.account_id === selectedAccountId)
   }, [messages, selectedAccountId])
+
+  useEffect(() => {
+    setSelectedMessageIds((prev) => {
+      if (prev.size === 0) {
+        return prev
+      }
+      const allowed = new Set(filteredMessages.map((message) => message.id))
+      const next = new Set<string>()
+      prev.forEach((id) => {
+        if (allowed.has(id)) {
+          next.add(id)
+        }
+      })
+      if (next.size === prev.size) {
+        return prev
+      }
+      return next
+    })
+  }, [filteredMessages])
 
   useEffect(() => {
     if (filteredMessages.length === 0) {
@@ -189,6 +220,8 @@ export default function HomePage() {
 
   const handleFolderChange = useCallback((folderId: string) => {
     setActiveFolder(folderId)
+    setSelectedMessageIds(new Set())
+    setSelectedMessageId(null)
   }, [])
 
   const handleRefresh = useCallback(() => {
@@ -201,6 +234,108 @@ export default function HomePage() {
   }, [router])
 
   const cachedMessageBody = selectedMessageBody
+
+  const handleToggleSelection = useCallback((messageId: string) => {
+    setSelectedMessageIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(messageId)) {
+        next.delete(messageId)
+      } else {
+        next.add(messageId)
+      }
+      return next
+    })
+  }, [])
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedMessageIds(new Set(filteredMessages.map((message) => message.id)))
+  }, [filteredMessages])
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedMessageIds(new Set())
+  }, [])
+
+  const runMessageAction = useCallback(
+    async (ids: string[], action: () => Promise<unknown>) => {
+      if (ids.length === 0) {
+        return
+      }
+      setMessageActionLoading(true)
+      setMessageActionError(null)
+      try {
+        await action()
+        setSelectedMessageIds((prev) => {
+          const next = new Set(prev)
+          ids.forEach((id) => next.delete(id))
+          return next
+        })
+        await loadMessages()
+      } catch (error) {
+        if (!handleAuthError(error)) {
+          setMessageActionError(error instanceof Error ? error.message : "Failed to process message action")
+        }
+      } finally {
+        setMessageActionLoading(false)
+      }
+    },
+    [handleAuthError, loadMessages],
+  )
+
+  const handleBulkMove = useCallback(
+    async (destinationFolder: string, ids?: string[]) => {
+      const targetIds = ids ?? Array.from(selectedMessageIds)
+      return runMessageAction(targetIds, () =>
+        moveMessages({ message_ids: targetIds, destination_folder: destinationFolder }),
+      )
+    },
+    [runMessageAction, selectedMessageIds],
+  )
+
+  const handleBulkSpam = useCallback(
+    async (ids?: string[]) => {
+      const targetIds = ids ?? Array.from(selectedMessageIds)
+      return runMessageAction(targetIds, () => markMessagesAsSpam({ message_ids: targetIds }))
+    },
+    [runMessageAction, selectedMessageIds],
+  )
+
+  const handleBulkDelete = useCallback(
+    async (options?: { permanent?: boolean; ids?: string[] }) => {
+      const targetIds = options?.ids ?? Array.from(selectedMessageIds)
+      return runMessageAction(targetIds, () =>
+        deleteMessages({ message_ids: targetIds, permanent: options?.permanent ?? false }),
+      )
+    },
+    [runMessageAction, selectedMessageIds],
+  )
+
+  const handleDropMessages = useCallback(
+    async (folderId: string, ids: string[]) => {
+      await handleBulkMove(folderId, ids)
+    },
+    [handleBulkMove],
+  )
+
+  const handleCurrentDelete = useCallback(
+    (options?: { permanent?: boolean }) => {
+      if (!selectedMessageId) return Promise.resolve()
+      return handleBulkDelete({ ...options, ids: [selectedMessageId] })
+    },
+    [handleBulkDelete, selectedMessageId],
+  )
+
+  const handleCurrentSpam = useCallback(() => {
+    if (!selectedMessageId) return Promise.resolve()
+    return handleBulkSpam([selectedMessageId])
+  }, [handleBulkSpam, selectedMessageId])
+
+  const handleCurrentMove = useCallback(
+    (folder: string) => {
+      if (!selectedMessageId) return Promise.resolve()
+      return handleBulkMove(folder, [selectedMessageId])
+    },
+    [handleBulkMove, selectedMessageId],
+  )
 
   useEffect(() => {
     const messageId = selectedMessageId
@@ -263,6 +398,7 @@ export default function HomePage() {
           errorMessage={accountsError}
           currentAdmin={currentAdmin}
           onLogout={handleLogout}
+          onDropMessages={handleDropMessages}
         />
         <MessageList
           messages={filteredMessages}
@@ -272,12 +408,27 @@ export default function HomePage() {
           unreadMessageIds={unreadMessageIds}
           onRefresh={handleRefresh}
           error={messagesError}
+          selectedMessageIds={selectedMessageIds}
+          onToggleSelect={handleToggleSelection}
+          onSelectAll={handleSelectAll}
+          onClearSelection={handleClearSelection}
+          onMoveSelected={handleBulkMove}
+          onDeleteSelected={handleBulkDelete}
+          onSpamSelected={handleBulkSpam}
+          actionLoading={messageActionLoading}
+          actionError={messageActionError}
+          activeFolder={activeFolder}
         />
         <MessageView
           message={selectedMessage}
           body={selectedMessageBody}
           loading={messageBodyLoading}
           error={messageBodyError}
+          activeFolder={activeFolder}
+          actionLoading={messageActionLoading}
+          onDelete={handleCurrentDelete}
+          onSpam={handleCurrentSpam}
+          onMove={handleCurrentMove}
         />
       </div>
     </div>
