@@ -4,11 +4,20 @@ services:
     build: ./backend
     environment:
       - ACCOUNTS_JSON=[{"host":"imap.example.com","username":"user@example.com","password":"password"}]
+      - ACCOUNTS_ENCRYPTION_KEY=${ACCOUNTS_ENCRYPTION_KEY}
     ports:
       - "8000:8000"
+    volumes:
+      - backend_data:/app/data
   frontend:
     build: ./frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=/api/backend
+      - BACKEND_URL=http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
       - backend
+
+volumes:
+  backend_data:

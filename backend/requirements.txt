@@ -3,3 +3,4 @@ imapclient
 python-dotenv
 uvicorn
 PyJWT
+cryptography
