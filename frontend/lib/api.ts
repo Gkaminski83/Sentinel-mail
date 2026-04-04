@@ -1,7 +1,6 @@
 import { getAuthToken } from "@/lib/auth"
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend"
 
 export type Account = {
   id: string
