@@ -2,3 +2,4 @@ fastapi
 imapclient
 python-dotenv
 uvicorn
+PyJWT
