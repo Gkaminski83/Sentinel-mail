@@ -5,11 +5,14 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend"
 export type Account = {
   id: string
   name: string
+  email?: string
   imap_host: string
   imap_port: number
   username: string
   secure: boolean
+  enabled?: boolean
   created_at: string
+  updated_at?: string
 }
 
 export type MessageSummary = {

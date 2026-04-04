@@ -128,19 +128,19 @@ export default function HomePage() {
     loadMessages()
   }, [authChecked, loadAccounts, loadMessages])
 
-  const selectedAccountEmail = useMemo(() => {
+  const selectedAccountId = useMemo(() => {
     if (activeAccountFilter === "all") {
       return null
     }
-    return accounts.find((account) => account.id === activeAccountFilter)?.email ?? null
+    return accounts.find((account) => account.id === activeAccountFilter)?.id ?? null
   }, [accounts, activeAccountFilter])
 
   const filteredMessages = useMemo(() => {
-    if (!selectedAccountEmail) {
+    if (!selectedAccountId) {
       return messages
     }
-    return messages.filter((message) => message.account === selectedAccountEmail)
-  }, [messages, selectedAccountEmail])
+    return messages.filter((message) => message.account_id === selectedAccountId)
+  }, [messages, selectedAccountId])
 
   useEffect(() => {
     if (filteredMessages.length === 0) {
