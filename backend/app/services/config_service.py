@@ -35,15 +35,32 @@ def _ensure_db():
             CREATE TABLE IF NOT EXISTS accounts (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                email TEXT,
                 imap_host TEXT NOT NULL,
                 imap_port INTEGER NOT NULL DEFAULT 993,
                 username TEXT NOT NULL,
                 password_encrypted BLOB NOT NULL,
                 secure INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT
             )
             """
         )
+        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}
+        def _add_column(name: str, ddl: str):
+            if name not in existing_columns:
+                conn.execute(f"ALTER TABLE accounts ADD COLUMN {ddl}")
+                existing_columns.add(name)
+
+        _add_column("email", "email TEXT")
+        _add_column("enabled", "enabled INTEGER NOT NULL DEFAULT 1")
+        _add_column("updated_at", "updated_at TEXT")
+
+        if "email" not in existing_columns:
+            conn.execute("UPDATE accounts SET email = username WHERE email IS NULL")
+        if "updated_at" not in existing_columns:
+            conn.execute("UPDATE accounts SET updated_at = created_at WHERE updated_at IS NULL")
 
 
 def _get_connection():
@@ -68,57 +85,72 @@ def _row_to_account(row: sqlite3.Row, include_password: bool = False) -> Dict:
     account = {
         "id": row["id"],
         "name": row["name"],
+        "email": row["email"] or row["username"],
         "imap_host": row["imap_host"],
         "imap_port": row["imap_port"],
         "username": row["username"],
         "secure": bool(row["secure"]),
         "created_at": row["created_at"],
+        "updated_at": row["updated_at"] or row["created_at"],
+        "enabled": bool(row["enabled"] if "enabled" in row.keys() else 1),
     }
     if include_password:
         account["password"] = _decrypt(row["password_encrypted"])
     return account
 
 
-def list_accounts(include_password: bool = False) -> List[Dict]:
+def list_accounts(include_password: bool = False, only_enabled: bool = False) -> List[Dict]:
+    query = "SELECT * FROM accounts"
+    params: List = []
+    if only_enabled:
+        query += " WHERE enabled = 1"
+    query += " ORDER BY created_at DESC"
     with _get_connection() as conn:
-        rows = conn.execute("SELECT * FROM accounts ORDER BY created_at DESC").fetchall()
+        rows = conn.execute(query, params).fetchall()
     return [_row_to_account(row, include_password=include_password) for row in rows]
 
 
-def load_accounts() -> List[Dict]:
-    return list_accounts(include_password=True)
+def load_accounts(only_enabled: bool = False) -> List[Dict]:
+    return list_accounts(include_password=True, only_enabled=only_enabled)
 
 
 def add_account(account: Dict) -> Dict:
     account_id = str(uuid4())
     now = datetime.utcnow().isoformat()
     secure_flag = 1 if account.get("secure", True) else 0
+    enabled_flag = 1 if account.get("enabled", True) else 0
     password_encrypted = _encrypt(account["password"])
     with _lock, _get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO accounts (id, name, imap_host, imap_port, username, password_encrypted, secure, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO accounts (id, name, email, imap_host, imap_port, username, password_encrypted, secure, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 account_id,
                 account["name"],
+                account.get("email") or account["username"],
                 account["imap_host"],
                 account.get("imap_port", 993),
                 account["username"],
                 password_encrypted,
                 secure_flag,
+                enabled_flag,
+                now,
                 now,
             ),
         )
     return {
         "id": account_id,
         "name": account["name"],
+        "email": account.get("email") or account["username"],
         "imap_host": account["imap_host"],
         "imap_port": account.get("imap_port", 993),
         "username": account["username"],
         "secure": bool(secure_flag),
+        "enabled": bool(enabled_flag),
         "created_at": now,
+        "updated_at": now,
     }
 
 
@@ -142,6 +174,9 @@ def update_account(account_id: str, new_data: Dict) -> Optional[Dict]:
     if "name" in new_data:
         fields.append("name = ?")
         values.append(new_data["name"])
+    if "email" in new_data:
+        fields.append("email = ?")
+        values.append(new_data["email"])
     if "imap_host" in new_data:
         fields.append("imap_host = ?")
         values.append(new_data["imap_host"])
@@ -157,10 +192,15 @@ def update_account(account_id: str, new_data: Dict) -> Optional[Dict]:
     if "password" in new_data:
         fields.append("password_encrypted = ?")
         values.append(_encrypt(new_data["password"]))
+    if "enabled" in new_data:
+        fields.append("enabled = ?")
+        values.append(1 if new_data["enabled"] else 0)
 
     if not fields:
         return get_account(account_id)
 
+    fields.append("updated_at = ?")
+    values.append(datetime.utcnow().isoformat())
     values.append(account_id)
     with _lock, _get_connection() as conn:
         cur = conn.execute(f"UPDATE accounts SET {', '.join(fields)} WHERE id = ?", values)

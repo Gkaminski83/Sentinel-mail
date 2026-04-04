@@ -4,12 +4,17 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api/backend"
 
 export type Account = {
   id: string
-  email: string
+  name: string
   imap_host: string
+  imap_port: number
+  username: string
+  secure: boolean
+  created_at: string
 }
 
 export type MessageSummary = {
   id: string
+  account_id: string
   account: string
   subject: string
   from: string
@@ -61,6 +66,28 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function getAccounts(init?: RequestInit): Promise<Account[]> {
   return fetchJson<Account[]>("/accounts", init)
+}
+
+export type CreateAccountInput = {
+  name: string
+  imap_host: string
+  imap_port?: number
+  username: string
+  password: string
+  secure?: boolean
+}
+
+export async function createAccount(input: CreateAccountInput) {
+  return fetchJson<Account>("/accounts", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteAccount(accountId: string) {
+  return fetchJson<void>(`/accounts/${accountId}`, {
+    method: "DELETE",
+  })
 }
 
 export async function getMessages(init?: RequestInit): Promise<MessageSummary[]> {

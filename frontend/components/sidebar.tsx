@@ -1,5 +1,7 @@
 "use client"
 
+import Link from "next/link"
+
 import { Account } from "@/lib/api"
 
 const folders = [
@@ -70,10 +72,16 @@ export function Sidebar({
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs uppercase tracking-tight text-slate-500">Accounts</p>
-          <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] text-text">
-            {accounts.length}
-          </span>
+          <div>
+            <p className="text-xs uppercase tracking-tight text-slate-500">Accounts</p>
+            <p className="text-[10px] text-slate-500">Manage IMAP sources</p>
+          </div>
+          <Link
+            href="/settings/accounts"
+            className="rounded-full border border-white/10 px-3 py-1 text-[10px] uppercase tracking-wider text-accent transition hover:border-accent/60 hover:text-white"
+          >
+            Configure
+          </Link>
         </div>
         {errorMessage && (
           <p className="rounded-2xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
@@ -100,8 +108,8 @@ export function Sidebar({
                 }`}
               >
                 <div>
-                  <p className="font-medium text-text">{account.email}</p>
-                  <p className="text-xs text-slate-500">{account.imap_host}</p>
+                  <p className="font-medium text-text">{account.name}</p>
+                  <p className="text-xs text-slate-500">{account.username} · {account.imap_host}</p>
                 </div>
               </button>
             )
