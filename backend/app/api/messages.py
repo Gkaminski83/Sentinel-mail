@@ -12,8 +12,8 @@ def get_messages():
 def get_message(id: str):
     service = IMAPService()
     try:
-        account, msgid = id.split("|", 1)
-        body = service.fetch_email_body(account, msgid)
+        account_id, msgid = id.split("|", 1)
+        body = service.fetch_email_body(account_id, msgid)
         if body is None:
             raise HTTPException(status_code=404, detail="Message not found")
         return {"id": id, "body": body}

@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^npx create-next-app@latest frontend --ts --tailwind --eslint --app --src-dir --no-interactive$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
