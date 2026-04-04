@@ -17,6 +17,8 @@ type SidebarProps = {
   activeFolder: string
   onSelectFolder: (folderId: string) => void
   errorMessage?: string | null
+  currentAdmin?: string | null
+  onLogout?: () => void
 }
 
 export function Sidebar({
@@ -27,12 +29,23 @@ export function Sidebar({
   activeFolder,
   onSelectFolder,
   errorMessage,
+  currentAdmin,
+  onLogout,
 }: SidebarProps) {
   return (
     <aside className="flex h-full w-60 flex-col gap-6 border-r border-white/5 bg-panel/80 px-5 py-6 text-sm text-muted">
       <div>
         <p className="text-xs uppercase tracking-wide text-slate-500">Workspace</p>
         <h1 className="text-xl font-semibold text-text">Sentinel Mail</h1>
+        <div className="mt-3 flex items-center justify-between rounded-2xl border border-white/5 px-3 py-2 text-xs text-muted">
+          <span className="text-text">{currentAdmin ?? "Admin"}</span>
+          <button
+            onClick={onLogout}
+            className="text-[11px] uppercase tracking-widest text-accent transition hover:text-white"
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
       <nav className="space-y-2">

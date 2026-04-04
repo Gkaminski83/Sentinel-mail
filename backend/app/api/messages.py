@@ -1,15 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.api.auth import get_current_admin
 from app.services.imap_service import IMAPService
 
 router = APIRouter()
 
 @router.get("/messages")
-def get_messages():
+def get_messages(_: str = Depends(get_current_admin)):
     service = IMAPService()
     return service.fetch_latest_emails()
 
 @router.get("/messages/{id}")
-def get_message(id: str):
+def get_message(id: str, _: str = Depends(get_current_admin)):
     service = IMAPService()
     try:
         account_id, msgid = id.split("|", 1)

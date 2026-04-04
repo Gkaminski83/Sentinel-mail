@@ -1,3 +1,5 @@
+import { getAuthToken } from "@/lib/auth"
+
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 
@@ -21,19 +23,38 @@ export type MessageDetail = {
   body: string
 }
 
+export class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     cache: "no-store",
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
       ...(init?.headers || {}),
     },
   })
 
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(`Request to ${path} failed: ${response.status} ${text}`)
+    let message = text
+    try {
+      const parsed = text ? JSON.parse(text) : null
+      if (parsed) {
+        message = typeof parsed === "string" ? parsed : parsed.detail ?? parsed.message ?? text
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new ApiError(message || `Request to ${path} failed`, response.status)
   }
 
   return response.json() as Promise<T>
@@ -52,4 +73,15 @@ export async function getMessageBody(
   init?: RequestInit,
 ): Promise<MessageDetail> {
   return fetchJson<MessageDetail>(`/messages/${encodeURIComponent(id)}`, init)
+}
+
+export async function login(username: string, password: string) {
+  return fetchJson<{ token: string; expires_at: string }>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function getCurrentAdmin() {
+  return fetchJson<{ username: string }>("/auth/me")
 }
