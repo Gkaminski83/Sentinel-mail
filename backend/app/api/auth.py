@@ -40,17 +40,6 @@ def decode_admin_token(token: str) -> str:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     return username
 
-@router.post("/auth/login", response_model=TokenResponse)
-def login(credentials: LoginRequest):
-    if credentials.username != ADMIN_USERNAME or credentials.password != ADMIN_PASSWORD:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    return _create_access_token(credentials.username)
-
-@router.get("/auth/me")
-def auth_me(current_admin: str = Depends(get_current_admin)):
-    return {"username": current_admin}
-
 def get_current_admin(request: Request) -> str:
     cached_admin = getattr(request.state, "admin", None)
     if cached_admin:
@@ -64,3 +53,14 @@ def get_current_admin(request: Request) -> str:
     admin = decode_admin_token(token)
     request.state.admin = admin
     return admin
+
+@router.post("/auth/login", response_model=TokenResponse)
+def login(credentials: LoginRequest):
+    if credentials.username != ADMIN_USERNAME or credentials.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    return _create_access_token(credentials.username)
+
+@router.get("/auth/me")
+def auth_me(current_admin: str = Depends(get_current_admin)):
+    return {"username": current_admin}
