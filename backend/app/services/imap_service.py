@@ -1,7 +1,11 @@
 import logging
 from datetime import datetime
+from email import message_from_bytes
 from email.header import decode_header, make_header
+from email.policy import default
 from email.utils import parsedate_to_datetime
+from html import unescape
+from html.parser import HTMLParser
 from typing import Any, Dict, List
 
 from imapclient import IMAPClient
@@ -10,6 +14,62 @@ from app.services import config_service
 
 
 logger = logging.getLogger(__name__)
+
+
+class _HTMLStripper(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._chunks: List[str] = []
+
+    def handle_data(self, data: str):
+        if data:
+            self._chunks.append(data)
+
+    def get_text(self) -> str:
+        return unescape("".join(self._chunks))
+
+
+def _html_to_text(content: str) -> str:
+    stripper = _HTMLStripper()
+    stripper.feed(content)
+    stripper.close()
+    return stripper.get_text()
+
+
+def _extract_text_from_email(raw_bytes: bytes) -> str:
+    try:
+        message = message_from_bytes(raw_bytes, policy=default)
+    except Exception:
+        return raw_bytes.decode(errors="ignore")
+
+    body = message.get_body(preferencelist=("plain", "html"))
+    if body:
+        content = body.get_content()
+        if body.get_content_type() == "text/html":
+            return _html_to_text(content)
+        return content
+
+    if message.is_multipart():
+        for part in message.walk():
+            if part.get_content_maintype() == "text":
+                content = part.get_content()
+                if part.get_content_subtype() == "html":
+                    return _html_to_text(content)
+                return content
+
+    payload = message.get_payload(decode=True)
+    if isinstance(payload, bytes):
+        charset = message.get_content_charset() or "utf-8"
+        try:
+            text = payload.decode(charset, errors="ignore")
+        except LookupError:
+            text = payload.decode("utf-8", errors="ignore")
+        if message.get_content_subtype() == "html":
+            return _html_to_text(text)
+        return text
+    if isinstance(payload, str):
+        return payload
+    return ""
 
 
 class IMAPService:
@@ -32,10 +92,18 @@ class IMAPService:
                 client = self._connect(account)
                 client.select_folder("INBOX")
                 messages = client.search(["ALL"])[-limit:]
-                response = client.fetch(messages, ["ENVELOPE", "BODY.PEEK[]<0.200>"])
+                response = client.fetch(
+                    messages,
+                    ["ENVELOPE", "BODY.PEEK[TEXT]<0.200>", "BODY.PEEK[]<0.200>"],
+                )
                 for msgid, data in response.items():
                     envelope = data[b"ENVELOPE"]
-                    snippet = data.get(b"BODY[]", b"").decode(errors="ignore")[:200]
+                    snippet_bytes = (
+                        data.get(b"BODY[TEXT]<0.200>")
+                        or data.get(b"BODY[]<0.200>")
+                        or data.get(b"BODY[]", b"")
+                    )
+                    snippet = snippet_bytes.decode(errors="ignore").strip()
                     subject_value = envelope.subject
                     if isinstance(subject_value, bytes):
                         subject_value = subject_value.decode(errors="ignore")
@@ -98,7 +166,12 @@ class IMAPService:
         client = self._connect(account)
         client.select_folder("INBOX")
         response = client.fetch([int(msgid)], ["BODY[]"])
-        body = response[int(msgid)][b"BODY[]"].decode(errors="ignore")
+        raw_body = response[int(msgid)][b"BODY[]"]
+        if isinstance(raw_body, str):
+            raw_body_bytes = raw_body.encode()
+        else:
+            raw_body_bytes = raw_body
+        body = _extract_text_from_email(raw_body_bytes)
         client.logout()
         return body
 
