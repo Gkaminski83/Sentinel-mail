@@ -6,10 +6,14 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   type Account,
+  type CreateAccountInput,
+  type TestAccountResult,
+  type UpdateAccountInput,
   ApiError,
   createAccount,
   deleteAccount,
   getAccounts,
+  testAccountConnection,
   updateAccount,
 } from "@/lib/api"
 import { clearAuthToken, getAuthToken } from "@/lib/auth"
@@ -58,8 +62,10 @@ export default function AccountSettingsPage() {
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState<AccountFormState>(DEFAULT_FORM)
   const [submitting, setSubmitting] = useState(false)
+  const [testingConnection, setTestingConnection] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<TestAccountResult | null>(null)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
 
   const handleAuthError = useCallback(
@@ -103,6 +109,50 @@ export default function AccountSettingsPage() {
       ...prev,
       [name]: type === "checkbox" ? checked : type === "number" ? Number(value) : value,
     }))
+    setTestResult(null)
+  }
+
+  const buildPayload = (): UpdateAccountInput => {
+    const smtpPayloadProvided = Boolean(
+      form.smtp_enabled ||
+        form.smtp_host ||
+        form.smtp_port !== DEFAULT_FORM.smtp_port ||
+        form.smtp_username ||
+        form.smtp_password ||
+        form.smtp_from_name ||
+        form.smtp_from_email ||
+        form.smtp_secure !== DEFAULT_FORM.smtp_secure,
+    )
+
+    const smtpPayload = smtpPayloadProvided
+      ? {
+          host: form.smtp_host || undefined,
+          port: form.smtp_port || DEFAULT_FORM.smtp_port,
+          username: form.smtp_username || undefined,
+          password: form.smtp_password || undefined,
+          secure: form.smtp_secure,
+          enabled: form.smtp_enabled,
+          from_name: form.smtp_from_name || undefined,
+          from_email: form.smtp_from_email || undefined,
+        }
+      : undefined
+
+    const payload: UpdateAccountInput = {
+      name: form.name,
+      email: form.email || undefined,
+      imap_host: form.imap_host,
+      imap_port: form.imap_port,
+      username: form.username,
+      secure: form.secure,
+      enabled: form.enabled,
+      ...(smtpPayload ? { smtp: smtpPayload } : {}),
+    }
+
+    if (form.password) {
+      payload.password = form.password
+    }
+
+    return payload
   }
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -118,48 +168,26 @@ export default function AccountSettingsPage() {
     setSubmitting(true)
     setErrorMessage(null)
     setSuccessMessage(null)
+    setTestResult(null)
     try {
-      const smtpPayloadProvided = Boolean(
-        form.smtp_enabled ||
-          form.smtp_host ||
-          form.smtp_port !== DEFAULT_FORM.smtp_port ||
-          form.smtp_username ||
-          form.smtp_password ||
-          form.smtp_from_name ||
-          form.smtp_from_email ||
-          form.smtp_secure !== DEFAULT_FORM.smtp_secure,
-      )
-
-      const smtpPayload = smtpPayloadProvided
-        ? {
-            host: form.smtp_host || undefined,
-            port: form.smtp_port || DEFAULT_FORM.smtp_port,
-            username: form.smtp_username || undefined,
-            password: form.smtp_password || undefined,
-            secure: form.smtp_secure,
-            enabled: form.smtp_enabled,
-            from_name: form.smtp_from_name || undefined,
-            from_email: form.smtp_from_email || undefined,
-          }
-        : undefined
-
-      const basePayload = {
-        name: form.name,
-        email: form.email || undefined,
-        imap_host: form.imap_host,
-        imap_port: form.imap_port,
-        username: form.username,
-        secure: form.secure,
-        enabled: form.enabled,
-        ...(form.password ? { password: form.password } : {}),
-        ...(smtpPayload ? { smtp: smtpPayload } : {}),
-      }
+      const basePayload = buildPayload()
 
       if (editingAccount) {
         await updateAccount(editingAccount.id, basePayload)
         setSuccessMessage("Account updated")
       } else {
-        await createAccount(basePayload as typeof basePayload & { password: string })
+        const createPayload: CreateAccountInput = {
+          name: form.name,
+          email: basePayload.email,
+          imap_host: form.imap_host,
+          imap_port: form.imap_port,
+          username: form.username,
+          password: form.password as string,
+          secure: basePayload.secure ?? true,
+          enabled: basePayload.enabled ?? true,
+          smtp: basePayload.smtp,
+        }
+        await createAccount(createPayload)
         setSuccessMessage("Account added successfully")
       }
       setForm(DEFAULT_FORM)
@@ -171,6 +199,40 @@ export default function AccountSettingsPage() {
       }
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleTestConnection = async () => {
+    if (!form.imap_host || !form.username) {
+      setErrorMessage("IMAP host and username are required to test the connection")
+      return
+    }
+    if (!editingAccount && !form.password) {
+      setErrorMessage("Password is required to test a new account")
+      return
+    }
+    if (form.smtp_enabled && !form.smtp_host) {
+      setErrorMessage("Provide SMTP host or disable SMTP before testing")
+      return
+    }
+
+    setErrorMessage(null)
+    setSuccessMessage(null)
+    setTestingConnection(true)
+    setTestResult(null)
+    try {
+      const payload = buildPayload()
+      const result = await testAccountConnection({
+        ...payload,
+        account_id: editingAccount?.id,
+      })
+      setTestResult(result)
+    } catch (error) {
+      if (!handleAuthError(error)) {
+        setErrorMessage(error instanceof Error ? error.message : "Failed to test account")
+      }
+    } finally {
+      setTestingConnection(false)
     }
   }
 
@@ -195,6 +257,7 @@ export default function AccountSettingsPage() {
     setEditingAccount(account)
     setSuccessMessage(null)
     setErrorMessage(null)
+    setTestResult(null)
     setForm({
       name: account.name ?? "",
       email: account.email ?? "",
@@ -220,6 +283,7 @@ export default function AccountSettingsPage() {
     setForm(DEFAULT_FORM)
     setSuccessMessage(null)
     setErrorMessage(null)
+    setTestResult(null)
   }
 
   const sortedAccounts = useMemo(() => {
@@ -520,13 +584,38 @@ export default function AccountSettingsPage() {
                   />
                 </div>
               </div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full rounded-2xl bg-accent px-4 py-3 text-sm font-semibold uppercase tracking-widest text-background transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submitting ? "Saving…" : editingAccount ? "Update account" : "Add account"}
-              </button>
+              {testResult && (
+                <div className="rounded-2xl border border-white/10 bg-background/30 px-4 py-3 text-sm">
+                  <p className="mb-1 text-xs uppercase tracking-[0.3em] text-muted">Connection test</p>
+                  <p className={`text-sm ${testResult.imap_success ? "text-emerald-300" : "text-red-300"}`}>
+                    IMAP: {testResult.imap_success ? "Success" : testResult.imap_error || "Failed"}
+                  </p>
+                  {testResult.smtp_error !== "SMTP not configured" || testResult.smtp_success ? (
+                    <p className={`text-sm ${testResult.smtp_success ? "text-emerald-300" : "text-red-300"}`}>
+                      SMTP: {testResult.smtp_success ? "Success" : testResult.smtp_error || "Failed"}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted">SMTP: Not configured</p>
+                  )}
+                </div>
+              )}
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={testingConnection || submitting}
+                  className="w-full rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold uppercase tracking-widest text-text transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {testingConnection ? "Testing…" : "Test connection"}
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-2xl bg-accent px-4 py-3 text-sm font-semibold uppercase tracking-widest text-background transition hover:bg-accent/80 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submitting ? "Saving…" : editingAccount ? "Update account" : "Add account"}
+                </button>
+              </div>
             </form>
           </section>
         </div>

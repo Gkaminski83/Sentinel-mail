@@ -119,6 +119,24 @@ export async function updateAccount(accountId: string, input: UpdateAccountInput
   })
 }
 
+export type TestAccountInput = UpdateAccountInput & {
+  account_id?: string
+}
+
+export type TestAccountResult = {
+  imap_success: boolean
+  imap_error?: string | null
+  smtp_success: boolean
+  smtp_error?: string | null
+}
+
+export async function testAccountConnection(input: TestAccountInput) {
+  return fetchJson<TestAccountResult>("/accounts/test", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
 export async function deleteAccount(accountId: string) {
   return fetchJson<void>(`/accounts/${accountId}`, {
     method: "DELETE",
