@@ -1,0 +1,4 @@
+fastapi
+imapclient
+python-dotenv
+uvicorn
