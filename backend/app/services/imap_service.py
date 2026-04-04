@@ -10,6 +10,8 @@ from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Dict, Iterable, List, Tuple
 
+import bleach
+
 from imapclient import IMAPClient
 
 from app.services import config_service
@@ -20,6 +22,45 @@ DEFAULT_FOLDER = "INBOX"
 TRASH_FOLDER = "Trash"
 SPAM_FOLDER = "Spam"
 SPAM_FLAGS = ("\\Junk", "\\Spam")
+
+ALLOWED_HTML_TAGS = sorted(
+    set(
+        bleach.sanitizer.ALLOWED_TAGS
+        | {
+            "p",
+            "pre",
+            "blockquote",
+            "img",
+            "hr",
+            "span",
+            "br",
+            "strong",
+            "em",
+            "ul",
+            "ol",
+            "li",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+            "code",
+        }
+    )
+)
+
+ALLOWED_HTML_ATTRS = {
+    **bleach.sanitizer.ALLOWED_ATTRIBUTES,
+    "a": ["href", "title", "target", "rel"],
+    "img": ["src", "alt", "title", "width", "height"],
+    "td": ["colspan", "rowspan", "align"],
+    "th": ["colspan", "rowspan", "align"],
+    "span": ["style"],
+}
+
+ALLOWED_HTML_PROTOCOLS = ["http", "https", "mailto"]
+
 
 class _HTMLStripper(HTMLParser):
     def __init__(self):
@@ -41,40 +82,81 @@ def _html_to_text(content: str) -> str:
     return stripper.get_text()
 
 
-def _extract_text_from_email(raw_bytes: bytes) -> str:
+def _decode_text_part(part) -> str:
+    payload = part.get_payload(decode=True)
+    if isinstance(payload, bytes):
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            return payload.decode(charset, errors="ignore")
+        except LookupError:
+            return payload.decode("utf-8", errors="ignore")
+    content = part.get_payload()
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+def _sanitize_html(content: str) -> str:
+    return bleach.clean(
+        content,
+        tags=ALLOWED_HTML_TAGS,
+        attributes=ALLOWED_HTML_ATTRS,
+        protocols=ALLOWED_HTML_PROTOCOLS,
+        strip=True,
+    )
+
+
+def _extract_email_content(raw_bytes: bytes) -> Dict[str, Any]:
     try:
         message = message_from_bytes(raw_bytes, policy=default)
     except Exception:
-        return raw_bytes.decode(errors="ignore")
+        decoded = raw_bytes.decode(errors="ignore")
+        return {"text_body": decoded, "html_body": None, "attachments": []}
 
-    body = message.get_body(preferencelist=("plain", "html"))
-    if body:
-        content = body.get_content()
-        if body.get_content_type() == "text/html":
-            return _html_to_text(content)
-        return content
+    text_body: str | None = None
+    html_body: str | None = None
+    attachments: List[Dict[str, Any]] = []
 
-    if message.is_multipart():
-        for part in message.walk():
-            if part.get_content_maintype() == "text":
-                content = part.get_content()
-                if part.get_content_subtype() == "html":
-                    return _html_to_text(content)
-                return content
+    for index, part in enumerate(message.walk()):
+        content_type = part.get_content_type()
+        disposition = part.get_content_disposition()
+        filename = part.get_filename()
 
-    payload = message.get_payload(decode=True)
-    if isinstance(payload, bytes):
-        charset = message.get_content_charset() or "utf-8"
-        try:
-            text = payload.decode(charset, errors="ignore")
-        except LookupError:
-            text = payload.decode("utf-8", errors="ignore")
+        if disposition in {"attachment", "inline"} and (filename or disposition == "attachment"):
+            payload = part.get_payload(decode=True) or b""
+            attachments.append(
+                {
+                    "id": f"att-{index}",
+                    "filename": filename or f"attachment-{index}",
+                    "content_type": content_type,
+                    "size": len(payload),
+                    "disposition": disposition or "attachment",
+                }
+            )
+            continue
+
+        if content_type == "text/plain" and text_body is None:
+            text_body = _decode_text_part(part).strip()
+            continue
+
+        if content_type == "text/html" and html_body is None:
+            html_body = _sanitize_html(_decode_text_part(part))
+            # also provide fallback plain text if missing
+            if not text_body:
+                text_body = _html_to_text(html_body)
+            continue
+
+    if text_body is None and not message.is_multipart():
+        text_body = _decode_text_part(message).strip()
         if message.get_content_subtype() == "html":
-            return _html_to_text(text)
-        return text
-    if isinstance(payload, str):
-        return payload
-    return ""
+            html_body = _sanitize_html(text_body)
+            text_body = _html_to_text(html_body)
+
+    return {
+        "text_body": text_body or "",
+        "html_body": html_body,
+        "attachments": attachments,
+    }
 
 
 class IMAPService:
@@ -188,9 +270,45 @@ class IMAPService:
             raw_body_bytes = raw_body.encode()
         else:
             raw_body_bytes = raw_body
-        body = _extract_text_from_email(raw_body_bytes)
+        body = _extract_email_content(raw_body_bytes)
         client.logout()
         return body
+
+    def fetch_attachment(self, account_id: str, folder: str, msgid: str, attachment_id: str):
+        accounts = config_service.load_accounts()
+        account = next((a for a in accounts if a["id"] == account_id), None)
+        if not account:
+            return None
+
+        try:
+            _, index_str = attachment_id.split("-", 1)
+            target_index = int(index_str)
+        except (ValueError, IndexError):
+            raise ValueError("Invalid attachment id")
+
+        client = self._connect(account)
+        try:
+            client.select_folder(folder)
+            response = client.fetch([int(msgid)], ["BODY[]"])
+            raw_body = response[int(msgid)][b"BODY[]"]
+            raw_body_bytes = raw_body.encode() if isinstance(raw_body, str) else raw_body
+            message = message_from_bytes(raw_body_bytes, policy=default)
+
+            for index, part in enumerate(message.walk()):
+                disposition = part.get_content_disposition()
+                filename = part.get_filename()
+                if disposition in {"attachment", "inline"} and (filename or disposition == "attachment"):
+                    if index == target_index:
+                        payload = part.get_payload(decode=True) or b""
+                        return {
+                            "filename": filename or f"attachment-{index}",
+                            "content_type": part.get_content_type(),
+                            "data": payload,
+                        }
+        finally:
+            client.logout()
+
+        return None
 
     def get_accounts(self):
         return config_service.list_accounts()

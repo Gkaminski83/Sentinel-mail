@@ -9,8 +9,10 @@ import { Sidebar } from "@/components/sidebar"
 import {
   type Account,
   type MessageSummary,
+  type MessageDetail,
   ApiError,
   deleteMessages,
+  downloadMessageAttachment,
   getAccounts,
   getCurrentAdmin,
   getMessageBody,
@@ -42,9 +44,10 @@ export default function HomePage() {
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set())
   const [readMessageIds, setReadMessageIds] = useState<Set<string>>(new Set())
 
-  const [messageBodies, setMessageBodies] = useState<Record<string, string>>({})
+  const [messageDetails, setMessageDetails] = useState<Record<string, MessageDetail>>({})
   const [messageBodyLoading, setMessageBodyLoading] = useState(false)
   const [messageBodyError, setMessageBodyError] = useState<string | null>(null)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
 
   const handleAuthError = useCallback(
     (error: unknown) => {
@@ -188,8 +191,8 @@ export default function HomePage() {
     ? messages.find((message) => message.id === selectedMessageId) ?? null
     : null
 
-  const selectedMessageBody = selectedMessageId
-    ? messageBodies[selectedMessageId] ?? null
+  const selectedMessageDetail = selectedMessageId
+    ? messageDetails[selectedMessageId] ?? null
     : null
 
   const unreadMessageIds = useMemo(() => {
@@ -233,7 +236,7 @@ export default function HomePage() {
     router.replace("/login?redirectTo=/")
   }, [router])
 
-  const cachedMessageBody = selectedMessageBody
+  const cachedMessageDetail = selectedMessageDetail
 
   const handleToggleSelection = useCallback((messageId: string) => {
     setSelectedMessageIds((prev) => {
@@ -345,7 +348,7 @@ export default function HomePage() {
       return
     }
 
-    if (cachedMessageBody) {
+    if (cachedMessageDetail) {
       setMessageBodyLoading(false)
       setMessageBodyError(null)
       return
@@ -356,13 +359,13 @@ export default function HomePage() {
     setMessageBodyError(null)
 
     getMessageBody(messageId)
-      .then(({ body }) => {
+      .then((detail) => {
         if (cancelled) return
-        setMessageBodies((prev) => {
+        setMessageDetails((prev) => {
           if (prev[messageId]) {
             return prev
           }
-          return { ...prev, [messageId]: body }
+          return { ...prev, [messageId]: detail }
         })
         setMessageBodyLoading(false)
       })
@@ -375,7 +378,36 @@ export default function HomePage() {
     return () => {
       cancelled = true
     }
-  }, [selectedMessageId, cachedMessageBody])
+  }, [selectedMessageId, cachedMessageDetail])
+
+  useEffect(() => {
+    setAttachmentError(null)
+  }, [selectedMessageId])
+
+  const handleDownloadAttachment = useCallback(
+    async (attachmentId: string) => {
+      if (!selectedMessageId) {
+        return
+      }
+      try {
+        setAttachmentError(null)
+        const { blob, filename } = await downloadMessageAttachment(selectedMessageId, attachmentId)
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = filename ?? attachmentId
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      } catch (error) {
+        if (!handleAuthError(error)) {
+          setAttachmentError(error instanceof Error ? error.message : "Failed to download attachment")
+        }
+      }
+    },
+    [handleAuthError, selectedMessageId],
+  )
 
   if (!authChecked) {
     return (
@@ -421,14 +453,16 @@ export default function HomePage() {
         />
         <MessageView
           message={selectedMessage}
-          body={selectedMessageBody}
+          detail={selectedMessageDetail}
           loading={messageBodyLoading}
           error={messageBodyError}
+          attachmentError={attachmentError}
           activeFolder={activeFolder}
           actionLoading={messageActionLoading}
           onDelete={handleCurrentDelete}
           onSpam={handleCurrentSpam}
           onMove={handleCurrentMove}
+          onDownloadAttachment={handleDownloadAttachment}
         />
       </div>
     </div>

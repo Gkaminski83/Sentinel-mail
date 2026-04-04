@@ -2,18 +2,20 @@
 
 import { useMemo } from "react"
 
-import { MessageSummary } from "@/lib/api"
+import { type MessageDetail, type MessageSummary } from "@/lib/api"
 
 type MessageViewProps = {
   message: MessageSummary | null
-  body: string | null
+  detail: MessageDetail | null
   loading: boolean
   error?: string | null
+  attachmentError?: string | null
   activeFolder: string
   actionLoading?: boolean
   onDelete?: (options?: { permanent?: boolean }) => Promise<void> | void
   onSpam?: () => Promise<void> | void
   onMove?: (folder: string) => Promise<void> | void
+  onDownloadAttachment?: (attachmentId: string) => Promise<void> | void
 }
 
 const QUICK_MOVE_TARGETS = [
@@ -26,14 +28,16 @@ const QUICK_MOVE_TARGETS = [
 
 export function MessageView({
   message,
-  body,
+  detail,
   loading,
   error,
+  attachmentError,
   activeFolder,
   actionLoading = false,
   onDelete,
   onSpam,
   onMove,
+  onDownloadAttachment,
 }: MessageViewProps) {
   const formattedDate = message
     ? new Date(message.date).toLocaleString(undefined, {
@@ -77,6 +81,20 @@ export function MessageView({
 
     return buttons
   }, [message, activeFolder, onDelete, onMove, onSpam])
+
+  const htmlBody = detail?.html_body ?? null
+  const textBody = detail?.text_body ?? ""
+  const attachments = detail?.attachments ?? []
+
+  const formatBytes = useMemo(
+    () =>
+      (size: number) => {
+        if (size < 1024) return `${size} B`
+        if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+        return `${(size / (1024 * 1024)).toFixed(1)} MB`
+      },
+    [],
+  )
 
   return (
     <section className="flex flex-1 flex-col bg-background/80 text-text">
@@ -150,19 +168,61 @@ export function MessageView({
           </div>
         )}
 
-        {!loading && error && <p className="text-red-400">{error}</p>}
+        {!loading && (error || attachmentError) && (
+          <div className="space-y-2">
+            {error && <p className="text-red-400">{error}</p>}
+            {attachmentError && <p className="text-amber-300">{attachmentError}</p>}
+          </div>
+        )}
 
-        {!loading && !error && body && (
-          <article className="mx-auto max-w-3xl space-y-4 text-lg leading-relaxed text-text">
-            {body.split(/\n\s*\n/).map((paragraph, index) => (
-              <p key={index} className="whitespace-pre-line text-muted">
-                {paragraph}
-              </p>
-            ))}
+        {!loading && !error && detail && (htmlBody || textBody) && (
+          <article className="mx-auto max-w-3xl space-y-6 text-lg leading-relaxed text-text">
+            {htmlBody ? (
+              <div
+                className="prose prose-invert max-w-none prose-headings:text-text prose-p:text-muted prose-a:text-accent"
+                dangerouslySetInnerHTML={{ __html: htmlBody }}
+              />
+            ) : (
+              textBody.split(/\n\s*\n/).map((paragraph, index) => (
+                <p key={index} className="whitespace-pre-line text-muted">
+                  {paragraph}
+                </p>
+              ))
+            )}
+
+            {attachments.length > 0 && (
+              <div className="rounded-3xl border border-white/10 bg-panel/40 px-6 py-5 text-sm">
+                <p className="mb-3 text-xs uppercase tracking-[0.3em] text-muted">Attachments</p>
+                <ul className="space-y-2">
+                  {attachments.map((attachment) => (
+                    <li
+                      key={attachment.id}
+                      className="flex items-center justify-between rounded-2xl border border-white/5 bg-background/50 px-4 py-3"
+                    >
+                      <div>
+                        <p className="text-text">{attachment.filename}</p>
+                        <p className="text-xs uppercase tracking-[0.3em] text-muted">
+                          {attachment.content_type} · {formatBytes(attachment.size)}
+                        </p>
+                      </div>
+                      {onDownloadAttachment && (
+                        <button
+                          className="rounded-full border border-white/10 px-4 py-1 text-[11px] uppercase tracking-[0.3em] text-muted transition hover:border-accent/60 hover:text-white"
+                          disabled={actionLoading}
+                          onClick={() => onDownloadAttachment(attachment.id)}
+                        >
+                          Download
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </article>
         )}
 
-        {!loading && !error && message && !body && (
+        {!loading && !error && message && !detail && (
           <p className="text-muted">No body available for this email.</p>
         )}
 

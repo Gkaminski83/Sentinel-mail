@@ -1,6 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.api.auth import get_current_admin
@@ -48,12 +49,13 @@ def get_message(id: str, _: str = Depends(get_current_admin)):
     service = IMAPService()
     try:
         account_id, folder, msgid = IMAPService.decode_message_id(id)
-        body = service.fetch_email_body(account_id, folder, msgid)
-        if body is None:
-            raise HTTPException(status_code=404, detail="Message not found")
-        return {"id": id, "body": body}
-    except Exception:
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid message id")
+
+    body = service.fetch_email_body(account_id, folder, msgid)
+    if body is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"id": id, **body}
 
 @router.post("/messages/actions/move")
 def move_messages(payload: MoveMessagesRequest, _: str = Depends(get_current_admin)):
@@ -70,3 +72,25 @@ def delete_messages(payload: DeleteMessagesRequest, _: str = Depends(get_current
 def mark_spam(payload: SpamMessagesRequest, _: str = Depends(get_current_admin)):
     service = IMAPService()
     return service.mark_spam(payload.message_ids)
+
+
+@router.get("/messages/{id}/attachments/{attachment_id}")
+def download_attachment(id: str, attachment_id: str, _: str = Depends(get_current_admin)):
+    service = IMAPService()
+    try:
+        account_id, folder, msgid = IMAPService.decode_message_id(id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid message id")
+
+    try:
+        attachment = service.fetch_attachment(account_id, folder, msgid, attachment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    if not attachment:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+
+    filename = attachment["filename"].replace('"', "")
+    content_type = attachment["content_type"] or "application/octet-stream"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=attachment["data"], media_type=content_type, headers=headers)

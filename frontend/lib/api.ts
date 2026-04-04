@@ -33,9 +33,19 @@ export type MessageSummary = {
   snippet: string
 }
 
+export type AttachmentSummary = {
+  id: string
+  filename: string
+  content_type: string
+  size: number
+  disposition: string
+}
+
 export type MessageDetail = {
   id: string
-  body: string
+  text_body: string
+  html_body: string | null
+  attachments: AttachmentSummary[]
 }
 
 export class ApiError extends Error {
@@ -169,11 +179,41 @@ export async function getMessages(
   return fetchJson<MessageSummary[]>(path, init)
 }
 
-export async function getMessageBody(
-  id: string,
-  init?: RequestInit,
-): Promise<MessageDetail> {
+export async function getMessageBody(id: string, init?: RequestInit): Promise<MessageDetail> {
   return fetchJson<MessageDetail>(`/messages/${encodeURIComponent(id)}`, init)
+}
+
+export async function downloadMessageAttachment(messageId: string, attachmentId: string) {
+  const response = await fetch(
+    `${API_BASE_URL}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    {
+      cache: "no-store",
+      headers: {
+        ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
+      },
+    },
+  )
+
+  if (!response.ok) {
+    const text = await response.text()
+    let message = text
+    try {
+      const parsed = text ? JSON.parse(text) : null
+      if (parsed) {
+        message = typeof parsed === "string" ? parsed : parsed.detail ?? parsed.message ?? text
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+    throw new ApiError(message || "Failed to download attachment", response.status)
+  }
+
+  const blob = await response.blob()
+  const disposition = response.headers.get("Content-Disposition") ?? ""
+  const match = /filename="?([^";]+)"?/i.exec(disposition)
+  const filename = match ? match[1] : undefined
+  const contentType = response.headers.get("Content-Type") ?? "application/octet-stream"
+  return { blob, filename, contentType }
 }
 
 export async function moveMessages(input: MessageActionInput & { destination_folder: string }) {
