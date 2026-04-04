@@ -11,6 +11,13 @@ export type Account = {
   username: string
   secure: boolean
   enabled?: boolean
+  smtp_host?: string | null
+  smtp_port?: number | null
+  smtp_username?: string | null
+  smtp_secure?: boolean | null
+  smtp_enabled?: boolean | null
+  smtp_from_name?: string | null
+  smtp_from_email?: string | null
   created_at: string
   updated_at?: string
 }
@@ -71,18 +78,43 @@ export async function getAccounts(init?: RequestInit): Promise<Account[]> {
   return fetchJson<Account[]>("/accounts", init)
 }
 
+export type SMTPSettingsInput = {
+  host?: string
+  port?: number
+  username?: string
+  password?: string
+  secure?: boolean
+  enabled?: boolean
+  from_name?: string
+  from_email?: string
+}
+
 export type CreateAccountInput = {
   name: string
+  email?: string
   imap_host: string
   imap_port?: number
   username: string
   password: string
   secure?: boolean
+  enabled?: boolean
+  smtp?: SMTPSettingsInput
 }
 
 export async function createAccount(input: CreateAccountInput) {
   return fetchJson<Account>("/accounts", {
     method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export type UpdateAccountInput = Partial<Omit<CreateAccountInput, "password">> & {
+  password?: string
+}
+
+export async function updateAccount(accountId: string, input: UpdateAccountInput) {
+  return fetchJson<Account>(`/accounts/${accountId}`, {
+    method: "PUT",
     body: JSON.stringify(input),
   })
 }

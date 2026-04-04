@@ -1,3 +1,4 @@
+import logging
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List
@@ -5,6 +6,9 @@ from typing import Any, Dict, List
 from imapclient import IMAPClient
 
 from app.services import config_service
+
+
+logger = logging.getLogger(__name__)
 
 
 class IMAPService:
@@ -19,8 +23,9 @@ class IMAPService:
         return client
 
     def fetch_latest_emails(self, limit: int = 50) -> List[Dict[str, Any]]:
-        accounts = config_service.load_accounts()
+        accounts = config_service.load_accounts(only_enabled=True)
         all_messages: List[Dict[str, Any]] = []
+        failures: List[Dict[str, str]] = []
         for account in accounts:
             try:
                 client = self._connect(account)
@@ -46,9 +51,28 @@ class IMAPService:
                         }
                     )
                 client.logout()
-            except Exception:
+            except Exception as exc:  # pragma: no cover - depends on external IMAP servers
+                logger.warning(
+                    "Failed to fetch emails for account %s (%s): %s",
+                    account.get("name"),
+                    account.get("id"),
+                    exc,
+                    exc_info=exc,
+                )
+                failures.append(
+                    {
+                        "account_id": account.get("id", "unknown"),
+                        "account": account.get("name", account.get("username", "unknown")),
+                        "error": str(exc),
+                    }
+                )
                 continue
         all_messages.sort(key=lambda x: x["date"], reverse=True)
+        if not all_messages and failures and accounts:
+            failure_strings = ", ".join(
+                f"{failure['account']}: {failure['error']}" for failure in failures
+            )
+            raise RuntimeError(f"All accounts failed to sync: {failure_strings}")
         return all_messages
 
     def fetch_email_body(self, account_id: str, msgid: str):

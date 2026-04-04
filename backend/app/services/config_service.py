@@ -42,24 +42,49 @@ def _ensure_db():
                 password_encrypted BLOB NOT NULL,
                 secure INTEGER NOT NULL DEFAULT 1,
                 enabled INTEGER NOT NULL DEFAULT 1,
+                smtp_host TEXT,
+                smtp_port INTEGER NOT NULL DEFAULT 587,
+                smtp_username TEXT,
+                smtp_password_encrypted BLOB,
+                smtp_secure INTEGER NOT NULL DEFAULT 1,
+                smtp_enabled INTEGER NOT NULL DEFAULT 0,
+                smtp_from_name TEXT,
+                smtp_from_email TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT
             )
             """
         )
         existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(accounts)")}
-        def _add_column(name: str, ddl: str):
-            if name not in existing_columns:
-                conn.execute(f"ALTER TABLE accounts ADD COLUMN {ddl}")
-                existing_columns.add(name)
 
-        _add_column("email", "email TEXT")
-        _add_column("enabled", "enabled INTEGER NOT NULL DEFAULT 1")
-        _add_column("updated_at", "updated_at TEXT")
+        def _add_column(name: str, ddl: str) -> bool:
+            if name in existing_columns:
+                return False
+            conn.execute(f"ALTER TABLE accounts ADD COLUMN {ddl}")
+            existing_columns.add(name)
+            return True
 
-        if "email" not in existing_columns:
+        if _add_column("email", "email TEXT"):
             conn.execute("UPDATE accounts SET email = username WHERE email IS NULL")
-        if "updated_at" not in existing_columns:
+        if _add_column("enabled", "enabled INTEGER NOT NULL DEFAULT 1"):
+            conn.execute("UPDATE accounts SET enabled = 1 WHERE enabled IS NULL")
+        if _add_column("smtp_host", "smtp_host TEXT"):
+            conn.execute("UPDATE accounts SET smtp_host = NULL")
+        if _add_column("smtp_port", "smtp_port INTEGER NOT NULL DEFAULT 587"):
+            conn.execute("UPDATE accounts SET smtp_port = 587 WHERE smtp_port IS NULL")
+        if _add_column("smtp_username", "smtp_username TEXT"):
+            conn.execute("UPDATE accounts SET smtp_username = NULL")
+        if _add_column("smtp_password_encrypted", "smtp_password_encrypted BLOB"):
+            conn.execute("UPDATE accounts SET smtp_password_encrypted = NULL")
+        if _add_column("smtp_secure", "smtp_secure INTEGER NOT NULL DEFAULT 1"):
+            conn.execute("UPDATE accounts SET smtp_secure = 1 WHERE smtp_secure IS NULL")
+        if _add_column("smtp_enabled", "smtp_enabled INTEGER NOT NULL DEFAULT 0"):
+            conn.execute("UPDATE accounts SET smtp_enabled = 0 WHERE smtp_enabled IS NULL")
+        if _add_column("smtp_from_name", "smtp_from_name TEXT"):
+            conn.execute("UPDATE accounts SET smtp_from_name = NULL")
+        if _add_column("smtp_from_email", "smtp_from_email TEXT"):
+            conn.execute("UPDATE accounts SET smtp_from_email = NULL")
+        if _add_column("updated_at", "updated_at TEXT"):
             conn.execute("UPDATE accounts SET updated_at = created_at WHERE updated_at IS NULL")
 
 
@@ -93,9 +118,18 @@ def _row_to_account(row: sqlite3.Row, include_password: bool = False) -> Dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"] or row["created_at"],
         "enabled": bool(row["enabled"] if "enabled" in row.keys() else 1),
+        "smtp_host": row["smtp_host"],
+        "smtp_port": row["smtp_port"] if "smtp_port" in row.keys() else None,
+        "smtp_username": row["smtp_username"],
+        "smtp_secure": bool(row["smtp_secure"]) if "smtp_secure" in row.keys() else True,
+        "smtp_enabled": bool(row["smtp_enabled"]) if "smtp_enabled" in row.keys() else False,
+        "smtp_from_name": row["smtp_from_name"],
+        "smtp_from_email": row["smtp_from_email"],
     }
     if include_password:
         account["password"] = _decrypt(row["password_encrypted"])
+        if row["smtp_password_encrypted"]:
+            account["smtp_password"] = _decrypt(row["smtp_password_encrypted"])
     return account
 
 
@@ -120,11 +154,36 @@ def add_account(account: Dict) -> Dict:
     secure_flag = 1 if account.get("secure", True) else 0
     enabled_flag = 1 if account.get("enabled", True) else 0
     password_encrypted = _encrypt(account["password"])
+    smtp_password_encrypted = (
+        _encrypt(account["smtp_password"]) if account.get("smtp_password") else None
+    )
+    smtp_secure_flag = 1 if account.get("smtp_secure", True) else 0
+    smtp_enabled_flag = 1 if account.get("smtp_enabled") else 0
     with _lock, _get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO accounts (id, name, email, imap_host, imap_port, username, password_encrypted, secure, enabled, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO accounts (
+                id,
+                name,
+                email,
+                imap_host,
+                imap_port,
+                username,
+                password_encrypted,
+                secure,
+                enabled,
+                smtp_host,
+                smtp_port,
+                smtp_username,
+                smtp_password_encrypted,
+                smtp_secure,
+                smtp_enabled,
+                smtp_from_name,
+                smtp_from_email,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 account_id,
@@ -136,6 +195,14 @@ def add_account(account: Dict) -> Dict:
                 password_encrypted,
                 secure_flag,
                 enabled_flag,
+                account.get("smtp_host"),
+                account.get("smtp_port", 587),
+                account.get("smtp_username"),
+                smtp_password_encrypted,
+                smtp_secure_flag,
+                smtp_enabled_flag,
+                account.get("smtp_from_name"),
+                account.get("smtp_from_email"),
                 now,
                 now,
             ),
@@ -149,6 +216,13 @@ def add_account(account: Dict) -> Dict:
         "username": account["username"],
         "secure": bool(secure_flag),
         "enabled": bool(enabled_flag),
+        "smtp_host": account.get("smtp_host"),
+        "smtp_port": account.get("smtp_port", 587),
+        "smtp_username": account.get("smtp_username"),
+        "smtp_secure": bool(smtp_secure_flag),
+        "smtp_enabled": bool(smtp_enabled_flag),
+        "smtp_from_name": account.get("smtp_from_name"),
+        "smtp_from_email": account.get("smtp_from_email"),
         "created_at": now,
         "updated_at": now,
     }
@@ -195,6 +269,30 @@ def update_account(account_id: str, new_data: Dict) -> Optional[Dict]:
     if "enabled" in new_data:
         fields.append("enabled = ?")
         values.append(1 if new_data["enabled"] else 0)
+    if "smtp_host" in new_data:
+        fields.append("smtp_host = ?")
+        values.append(new_data["smtp_host"])
+    if "smtp_port" in new_data:
+        fields.append("smtp_port = ?")
+        values.append(new_data["smtp_port"])
+    if "smtp_username" in new_data:
+        fields.append("smtp_username = ?")
+        values.append(new_data["smtp_username"])
+    if "smtp_secure" in new_data:
+        fields.append("smtp_secure = ?")
+        values.append(1 if new_data["smtp_secure"] else 0)
+    if "smtp_password" in new_data:
+        fields.append("smtp_password_encrypted = ?")
+        values.append(_encrypt(new_data["smtp_password"]))
+    if "smtp_enabled" in new_data:
+        fields.append("smtp_enabled = ?")
+        values.append(1 if new_data["smtp_enabled"] else 0)
+    if "smtp_from_name" in new_data:
+        fields.append("smtp_from_name = ?")
+        values.append(new_data["smtp_from_name"])
+    if "smtp_from_email" in new_data:
+        fields.append("smtp_from_email = ?")
+        values.append(new_data["smtp_from_email"])
 
     if not fields:
         return get_account(account_id)
