@@ -26,6 +26,7 @@ export type MessageSummary = {
   id: string
   account_id: string
   account: string
+  folder: string
   subject: string
   from: string
   date: string
@@ -143,8 +144,29 @@ export async function deleteAccount(accountId: string) {
   })
 }
 
-export async function getMessages(init?: RequestInit): Promise<MessageSummary[]> {
-  return fetchJson<MessageSummary[]>("/messages", init)
+type MessageActionResponse = {
+  processed: number
+  errors: Array<{ account_id: string; error: string }>
+}
+
+type MessageActionInput = {
+  message_ids: string[]
+}
+
+export async function getMessages(
+  params?: { folder?: string; limit?: number },
+  init?: RequestInit,
+): Promise<MessageSummary[]> {
+  const searchParams = new URLSearchParams()
+  if (params?.folder) {
+    searchParams.set("folder", params.folder)
+  }
+  if (params?.limit) {
+    searchParams.set("limit", String(params.limit))
+  }
+  const query = searchParams.toString()
+  const path = query ? `/messages?${query}` : "/messages"
+  return fetchJson<MessageSummary[]>(path, init)
 }
 
 export async function getMessageBody(
@@ -152,6 +174,27 @@ export async function getMessageBody(
   init?: RequestInit,
 ): Promise<MessageDetail> {
   return fetchJson<MessageDetail>(`/messages/${encodeURIComponent(id)}`, init)
+}
+
+export async function moveMessages(input: MessageActionInput & { destination_folder: string }) {
+  return fetchJson<MessageActionResponse>("/messages/actions/move", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export async function deleteMessages(input: MessageActionInput & { permanent?: boolean }) {
+  return fetchJson<MessageActionResponse>("/messages/actions/delete", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export async function markMessagesAsSpam(input: MessageActionInput) {
+  return fetchJson<MessageActionResponse>("/messages/actions/spam", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
 }
 
 export async function login(username: string, password: string) {

@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { DragEvent } from "react"
 
 import { Account } from "@/lib/api"
 
@@ -9,6 +10,7 @@ const folders = [
   { id: "starred", label: "Starred", glyph: "★" },
   { id: "sent", label: "Sent", glyph: "↗" },
   { id: "trash", label: "Trash", glyph: "⌫" },
+  { id: "spam", label: "Spam", glyph: "⚠" },
 ]
 
 type SidebarProps = {
@@ -21,6 +23,7 @@ type SidebarProps = {
   errorMessage?: string | null
   currentAdmin?: string | null
   onLogout?: () => void
+  onDropMessages?: (folderId: string, messageIds: string[]) => void
 }
 
 export function Sidebar({
@@ -33,7 +36,40 @@ export function Sidebar({
   errorMessage,
   currentAdmin,
   onLogout,
+  onDropMessages,
 }: SidebarProps) {
+  const extractDraggedMessageIds = (event: DragEvent) => {
+    const raw =
+      event.dataTransfer.getData("application/x-message-ids") ||
+      event.dataTransfer.getData("text/plain")
+    if (!raw) {
+      return []
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((id): id is string => typeof id === "string")
+      }
+    } catch {
+      // fall through to comma separated parsing
+    }
+    return raw
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+  }
+
+  const handleFolderDrop = (event: DragEvent, folderId: string) => {
+    if (!onDropMessages) return
+    event.preventDefault()
+    event.stopPropagation()
+    const ids = extractDraggedMessageIds(event)
+    if (ids.length === 0) {
+      return
+    }
+    onDropMessages(folderId, ids)
+  }
+
   return (
     <aside className="flex h-full w-60 flex-col gap-6 border-r border-white/5 bg-panel/80 px-5 py-6 text-sm text-muted">
       <div>
@@ -58,6 +94,12 @@ export function Sidebar({
             <button
               key={folder.id}
               onClick={() => onSelectFolder(folder.id)}
+              onDragOver={(event) => {
+                if (!onDropMessages) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = "move"
+              }}
+              onDrop={(event) => handleFolderDrop(event, folder.id)}
               className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition hover:bg-white/5 ${
                 isActive ? "bg-white/10 text-white" : "text-slate-300"
               }`}

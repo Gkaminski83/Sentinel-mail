@@ -143,6 +143,7 @@ class IMAPService:
                             "id": self._encode_message_id(account["id"], folder, msgid),
                             "account_id": account["id"],
                             "account": account["name"],
+                            "folder": folder,
                             "subject": subject,
                             "from": from_addr,
                             "date": date.isoformat(),
