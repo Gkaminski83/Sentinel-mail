@@ -1,4 +1,6 @@
 import logging
+from collections import defaultdict
+from contextlib import suppress
 from datetime import datetime
 from email import message_from_bytes
 from email.header import decode_header, make_header
@@ -6,15 +8,18 @@ from email.policy import default
 from email.utils import parsedate_to_datetime
 from html import unescape
 from html.parser import HTMLParser
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 from imapclient import IMAPClient
 
 from app.services import config_service
 
-
 logger = logging.getLogger(__name__)
 
+DEFAULT_FOLDER = "INBOX"
+TRASH_FOLDER = "Trash"
+SPAM_FOLDER = "Spam"
+SPAM_FLAGS = ("\\Junk", "\\Spam")
 
 class _HTMLStripper(HTMLParser):
     def __init__(self):
@@ -83,14 +88,25 @@ class IMAPService:
         client.login(account["username"], account["password"])
         return client
 
-    def fetch_latest_emails(self, limit: int = 50) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _encode_message_id(account_id: str, folder: str, uid: int) -> str:
+        return f"{account_id}|{folder}|{uid}"
+
+    @staticmethod
+    def decode_message_id(message_id: str) -> Tuple[str, str, str]:
+        parts = message_id.split("|", 2)
+        if len(parts) != 3:
+            raise ValueError("Invalid message id")
+        return parts[0], parts[1], parts[2]
+
+    def fetch_latest_emails(self, limit: int = 50, folder: str = DEFAULT_FOLDER) -> List[Dict[str, Any]]:
         accounts = config_service.load_accounts(only_enabled=True)
         all_messages: List[Dict[str, Any]] = []
         failures: List[Dict[str, str]] = []
         for account in accounts:
             try:
                 client = self._connect(account)
-                client.select_folder("INBOX")
+                client.select_folder(folder)
                 messages = client.search(["ALL"])[-limit:]
                 response = client.fetch(
                     messages,
@@ -124,7 +140,7 @@ class IMAPService:
                         date = datetime.utcnow()
                     all_messages.append(
                         {
-                            "id": f"{account['id']}|{msgid}",
+                            "id": self._encode_message_id(account["id"], folder, msgid),
                             "account_id": account["id"],
                             "account": account["name"],
                             "subject": subject,
@@ -158,13 +174,13 @@ class IMAPService:
             raise RuntimeError(f"All accounts failed to sync: {failure_strings}")
         return all_messages
 
-    def fetch_email_body(self, account_id: str, msgid: str):
+    def fetch_email_body(self, account_id: str, folder: str, msgid: str):
         accounts = config_service.load_accounts()
         account = next((a for a in accounts if a["id"] == account_id), None)
         if not account:
             return None
         client = self._connect(account)
-        client.select_folder("INBOX")
+        client.select_folder(folder)
         response = client.fetch([int(msgid)], ["BODY[]"])
         raw_body = response[int(msgid)][b"BODY[]"]
         if isinstance(raw_body, str):
@@ -177,3 +193,69 @@ class IMAPService:
 
     def get_accounts(self):
         return config_service.list_accounts()
+
+    def move_messages(self, message_ids: Iterable[str], destination: str):
+        return self._apply_imap_action(message_ids, destination_folder=destination, action="move")
+
+    def copy_messages(self, message_ids: Iterable[str], destination: str):
+        return self._apply_imap_action(message_ids, destination_folder=destination, action="copy")
+
+    def delete_messages(self, message_ids: Iterable[str], permanent: bool = False):
+        if permanent:
+            return self._apply_imap_action(message_ids, action="delete", permanent=True)
+        return self.move_messages(message_ids, TRASH_FOLDER)
+
+    def mark_spam(self, message_ids: Iterable[str]):
+        return self._apply_imap_action(message_ids, destination_folder=SPAM_FOLDER, action="spam")
+
+    def _apply_imap_action(
+        self,
+        message_ids: Iterable[str],
+        destination_folder: str | None = None,
+        action: str = "move",
+        permanent: bool = False,
+    ):
+        grouped: Dict[str, Dict[str, List[int]]] = defaultdict(lambda: defaultdict(list))
+        for message_id in message_ids:
+            account_id, folder, uid = self.decode_message_id(message_id)
+            grouped[account_id][folder].append(int(uid))
+
+        results = {"processed": 0, "errors": []}
+        accounts = {acc["id"]: acc for acc in config_service.load_accounts(only_enabled=True)}
+        for account_id, folders in grouped.items():
+            account = accounts.get(account_id)
+            if not account:
+                results["errors"].append({"account_id": account_id, "error": "Account not found"})
+                continue
+            client = self._connect(account)
+            try:
+                for folder, uids in folders.items():
+                    client.select_folder(folder)
+                    if action == "move":
+                        if not destination_folder:
+                            raise ValueError("Destination folder is required for move action")
+                        client.move(uids, destination_folder)
+                    elif action == "copy":
+                        if not destination_folder:
+                            raise ValueError("Destination folder is required for copy action")
+                        client.copy(uids, destination_folder)
+                    elif action == "delete":
+                        if destination_folder:
+                            client.move(uids, destination_folder)
+                        else:
+                            client.delete_messages(uids)
+                            if permanent:
+                                client.expunge()
+                    elif action == "spam":
+                        if not destination_folder:
+                            raise ValueError("Destination folder is required for spam action")
+                        client.move(uids, SPAM_FOLDER)
+                        for flag in SPAM_FLAGS:
+                            with suppress(Exception):
+                                client.add_flags(uids, flag)
+                    else:
+                        raise ValueError("Unsupported action")
+                    results["processed"] += len(uids)
+            finally:
+                client.logout()
+        return results
