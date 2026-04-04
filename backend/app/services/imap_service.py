@@ -35,7 +35,10 @@ class IMAPService:
                 for msgid, data in response.items():
                     envelope = data[b"ENVELOPE"]
                     snippet = data.get(b"BODY[]", b"").decode(errors="ignore")[:200]
-                    subject = str(make_header(decode_header(envelope.subject))) if envelope.subject else ""
+                    subject_value = envelope.subject
+                    if isinstance(subject_value, bytes):
+                        subject_value = subject_value.decode(errors="ignore")
+                    subject = str(make_header(decode_header(subject_value))) if subject_value else ""
                     sender = envelope.from_[0]
                     from_addr = f"{sender.mailbox.decode()}@{sender.host.decode()}"
                     date = parsedate_to_datetime(envelope.date)
