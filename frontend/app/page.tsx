@@ -47,6 +47,9 @@ const sanitizeAttachmentDraft = (attachment?: Partial<AttachmentDraft> | null): 
 }
 
 const normalizeComposeDraft = (input?: StoredComposeDraft | null): ComposeDraft => {
+  const references = input?.references
+  const attachments = input?.attachments
+
   return {
     accountId: typeof input?.accountId === "string" ? input.accountId : "",
     to: typeof input?.to === "string" ? input.to : "",
@@ -55,13 +58,13 @@ const normalizeComposeDraft = (input?: StoredComposeDraft | null): ComposeDraft 
     subject: typeof input?.subject === "string" ? input.subject : "",
     body: typeof input?.body === "string" ? input.body : "",
     inReplyTo: typeof input?.inReplyTo === "string" ? input.inReplyTo : null,
-    references: Array.isArray(input?.references)
-      ? input.references.filter((reference): reference is string => typeof reference === "string" && reference.length > 0)
-      : input?.references === null
+    references: Array.isArray(references)
+      ? references.filter((reference): reference is string => typeof reference === "string" && reference.length > 0)
+      : references === null
         ? null
         : undefined,
-    attachments: Array.isArray(input?.attachments)
-      ? input.attachments
+    attachments: Array.isArray(attachments)
+      ? attachments
           .map((attachment) => sanitizeAttachmentDraft(attachment))
           .filter((attachment): attachment is AttachmentDraft => Boolean(attachment))
       : [],
