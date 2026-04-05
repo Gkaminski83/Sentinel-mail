@@ -3,8 +3,8 @@
 import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 
-import { getAuthToken, setAuthToken } from "@/lib/auth"
-import { login } from "@/lib/api"
+import { clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth"
+import { getCurrentAdmin, login } from "@/lib/api"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -17,8 +17,30 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (getAuthToken()) {
-      router.replace(redirectTo)
+    let cancelled = false
+
+    const verifySession = async () => {
+      const token = getAuthToken()
+      if (!token) {
+        return
+      }
+
+      try {
+        await getCurrentAdmin()
+        if (!cancelled) {
+          router.replace(redirectTo)
+        }
+      } catch {
+        if (!cancelled) {
+          clearAuthToken()
+        }
+      }
+    }
+
+    verifySession()
+
+    return () => {
+      cancelled = true
     }
   }, [router, redirectTo])
 
