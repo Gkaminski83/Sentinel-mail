@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { MessageList } from "@/components/message-list"
 import { MessageView } from "@/components/message-view"
 import { Sidebar } from "@/components/sidebar"
+import { ComposePanel, type ComposeDraft, type AttachmentDraft } from "@/components/compose-panel"
 import {
   type Account,
   type MessageSummary,
@@ -19,8 +20,53 @@ import {
   getMessages,
   markMessagesAsSpam,
   moveMessages,
+  sendEmail,
+  type SendEmailInput,
 } from "@/lib/api"
 import { clearAuthToken, getAuthToken } from "@/lib/auth"
+
+const COMPOSE_DRAFT_STORAGE_KEY = "sentinel_compose_draft"
+
+type StoredComposeDraft = Partial<Omit<ComposeDraft, "attachments">> & {
+  attachments?: Partial<AttachmentDraft>[] | null
+}
+
+const createAttachmentId = () => `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
+const sanitizeAttachmentDraft = (attachment?: Partial<AttachmentDraft> | null): AttachmentDraft | null => {
+  if (!attachment || typeof attachment !== "object" || typeof attachment.base64 !== "string" || !attachment.base64) {
+    return null
+  }
+  return {
+    id: typeof attachment.id === "string" && attachment.id.length > 0 ? attachment.id : createAttachmentId(),
+    name: typeof attachment.name === "string" && attachment.name.length > 0 ? attachment.name : "attachment",
+    size: typeof attachment.size === "number" && Number.isFinite(attachment.size) ? attachment.size : 0,
+    type: typeof attachment.type === "string" && attachment.type.length > 0 ? attachment.type : "application/octet-stream",
+    base64: attachment.base64,
+  }
+}
+
+const normalizeComposeDraft = (input?: StoredComposeDraft | null): ComposeDraft => {
+  return {
+    accountId: typeof input?.accountId === "string" ? input.accountId : "",
+    to: typeof input?.to === "string" ? input.to : "",
+    cc: typeof input?.cc === "string" ? input.cc : "",
+    bcc: typeof input?.bcc === "string" ? input.bcc : "",
+    subject: typeof input?.subject === "string" ? input.subject : "",
+    body: typeof input?.body === "string" ? input.body : "",
+    inReplyTo: typeof input?.inReplyTo === "string" ? input.inReplyTo : null,
+    references: Array.isArray(input?.references)
+      ? input.references.filter((reference): reference is string => typeof reference === "string" && reference.length > 0)
+      : input?.references === null
+        ? null
+        : undefined,
+    attachments: Array.isArray(input?.attachments)
+      ? input.attachments
+          .map((attachment) => sanitizeAttachmentDraft(attachment))
+          .filter((attachment): attachment is AttachmentDraft => Boolean(attachment))
+      : [],
+  }
+}
 
 export default function HomePage() {
   const router = useRouter()
@@ -48,6 +94,48 @@ export default function HomePage() {
   const [messageBodyLoading, setMessageBodyLoading] = useState(false)
   const [messageBodyError, setMessageBodyError] = useState<string | null>(null)
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [composeError, setComposeError] = useState<string | null>(null)
+  const [composeSending, setComposeSending] = useState(false)
+  const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null)
+
+  const loadStoredComposeDraft = useCallback(() => {
+    if (typeof window === "undefined") {
+      return null
+    }
+    try {
+      const raw = window.localStorage.getItem(COMPOSE_DRAFT_STORAGE_KEY)
+      if (!raw) {
+        return null
+      }
+      const parsed = JSON.parse(raw) as StoredComposeDraft
+      return normalizeComposeDraft(parsed)
+    } catch {
+      return null
+    }
+  }, [])
+
+  const persistComposeDraft = useCallback((draftToSave: ComposeDraft) => {
+    if (typeof window === "undefined") {
+      return
+    }
+    try {
+      window.localStorage.setItem(COMPOSE_DRAFT_STORAGE_KEY, JSON.stringify(draftToSave))
+    } catch {
+      // ignore quota errors
+    }
+  }, [])
+
+  const clearStoredComposeDraft = useCallback(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+    try {
+      window.localStorage.removeItem(COMPOSE_DRAFT_STORAGE_KEY)
+    } catch {
+      // ignore
+    }
+  }, [])
 
   const handleAuthError = useCallback(
     (error: unknown) => {
@@ -384,6 +472,96 @@ export default function HomePage() {
     setAttachmentError(null)
   }, [selectedMessageId])
 
+  const openCompose = useCallback(() => {
+    setComposeDraft(loadStoredComposeDraft())
+    setComposeError(null)
+    setComposeOpen(true)
+  }, [loadStoredComposeDraft])
+
+  const openReply = useCallback(() => {
+    if (!selectedMessage || !selectedMessageDetail) {
+      return
+    }
+    setComposeError(null)
+    const replyDraft: ComposeDraft = {
+      accountId: selectedMessage.account_id,
+      to: selectedMessage.from,
+      cc: "",
+      bcc: "",
+      subject: selectedMessage.subject.startsWith("Re:")
+        ? selectedMessage.subject
+        : `Re: ${selectedMessage.subject}`,
+      body: `\n\nOn ${new Date(selectedMessage.date).toLocaleString()}, ${selectedMessage.from} wrote:\n${selectedMessageDetail.text_body}`,
+      inReplyTo: selectedMessageDetail.id,
+      references: [selectedMessageDetail.id],
+      attachments: [],
+    }
+    setComposeDraft(replyDraft)
+    setComposeOpen(true)
+  }, [selectedMessage, selectedMessageDetail])
+
+  const closeCompose = useCallback(() => {
+    if (composeSending) return
+    setComposeOpen(false)
+  }, [composeSending])
+
+  const parseRecipients = useCallback((value: string) => {
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((email) => ({ email }))
+  }, [])
+
+  const handleSendEmail = useCallback(
+    async (draftPayload: ComposeDraft) => {
+      if (composeSending) return
+      setComposeSending(true)
+      setComposeError(null)
+      const payload: SendEmailInput = {
+        account_id: draftPayload.accountId,
+        to: parseRecipients(draftPayload.to),
+        cc: parseRecipients(draftPayload.cc),
+        bcc: parseRecipients(draftPayload.bcc),
+        subject: draftPayload.subject,
+        text_body: draftPayload.body,
+        in_reply_to: draftPayload.inReplyTo,
+        references: draftPayload.references ?? undefined,
+        attachments:
+          draftPayload.attachments.length > 0
+            ? draftPayload.attachments.map((attachment) => ({
+                filename: attachment.name,
+                content_type: attachment.type,
+                content_base64: attachment.base64,
+              }))
+            : undefined,
+      }
+      try {
+        await sendEmail(payload)
+        setComposeSending(false)
+        setComposeOpen(false)
+        setComposeDraft(null)
+        clearStoredComposeDraft()
+        if (activeFolder === "sent") {
+          loadMessages()
+        }
+      } catch (error) {
+        setComposeSending(false)
+        if (!handleAuthError(error)) {
+          setComposeError(error instanceof Error ? error.message : "Failed to send message")
+        }
+      }
+    },
+    [activeFolder, composeSending, handleAuthError, loadMessages, parseRecipients],
+  )
+
+  const handleComposeDraftChange = useCallback(
+    (draftPayload: ComposeDraft) => {
+      persistComposeDraft(draftPayload)
+    },
+    [persistComposeDraft],
+  )
+
   const handleDownloadAttachment = useCallback(
     async (attachmentId: string) => {
       if (!selectedMessageId) {
@@ -463,6 +641,24 @@ export default function HomePage() {
           onSpam={handleCurrentSpam}
           onMove={handleCurrentMove}
           onDownloadAttachment={handleDownloadAttachment}
+          onReply={openReply}
+        />
+        <button
+          type="button"
+          className="fixed bottom-8 right-10 z-30 rounded-full border border-accent/40 bg-accent/20 px-6 py-3 text-sm uppercase tracking-[0.3em] text-white shadow-lg transition hover:bg-accent/30"
+          onClick={openCompose}
+        >
+          Compose
+        </button>
+        <ComposePanel
+          open={composeOpen}
+          accounts={accounts}
+          initialDraft={composeDraft}
+          sending={composeSending}
+          error={composeError}
+          onClose={closeCompose}
+          onSubmit={handleSendEmail}
+          onDraftChange={handleComposeDraftChange}
         />
       </div>
     </div>

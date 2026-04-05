@@ -29,17 +29,17 @@
 | Loading + error states across list/view | ✅ | Implemented across components. |
 | Pagination / infinite scroll | ⬜ | List currently loads last batch only. |
 | Threaded conversation view | ⬜ | Not implemented. |
-| Rich rendering of attachments / inline images | ⬜ | Body shown as plain text only. |
+| Rich rendering of attachments / inline images | 🟡 | HTML body rendering + attachment list/download shipped; inline images still pending. |
 
 ## 3. Message Composition & Sending
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Compose new email UI | ⬜ | No composer screen. |
+| Compose new email UI | ✅ | Full-screen composer with account switcher, recipients, subject/body, and attachment controls. |
 | Draft saving & autosave | ⬜ | Not implemented. |
-| Send via SMTP / provider API | ⬜ | Backend limited to IMAP read-only. |
-| Reply / Reply-all / Forward | ⬜ | Not available. |
+| Send via SMTP / provider API | 🟡 | SMTP service + send endpoint wired from frontend; delivery telemetry + retries pending. |
+| Reply / Reply-all / Forward | 🟡 | Single-message reply supported from detail view; reply-all/forward still pending. |
 | Signature management | ⬜ | Not available. |
-| Attachment upload & sending | ⬜ | Not available. |
+| Attachment upload & sending | ✅ | Compose UI supports up to 5×5MB files with validation, sent via SMTP payload. |
 
 ## 4. Search, Filtering & Organization
 | Feature | Status | Notes |

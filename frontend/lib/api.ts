@@ -22,6 +22,13 @@ export type Account = {
   updated_at?: string
 }
 
+export async function sendEmail(input: SendEmailInput) {
+  return fetchJson<{ message_id: string; sent_at: string; recipients: string[] }>("/messages/send", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
 export type MessageSummary = {
   id: string
   account_id: string
@@ -46,6 +53,30 @@ export type MessageDetail = {
   text_body: string
   html_body: string | null
   attachments: AttachmentSummary[]
+}
+
+export type RecipientInput = {
+  email: string
+  name?: string | null
+}
+
+export type AttachmentUpload = {
+  filename?: string | null
+  content_type?: string | null
+  content_base64: string
+}
+
+export type SendEmailInput = {
+  account_id: string
+  to: RecipientInput[]
+  cc?: RecipientInput[]
+  bcc?: RecipientInput[]
+  subject?: string
+  text_body?: string | null
+  html_body?: string | null
+  in_reply_to?: string | null
+  references?: string[] | null
+  attachments?: AttachmentUpload[]
 }
 
 export class ApiError extends Error {

@@ -16,6 +16,7 @@ type MessageViewProps = {
   onSpam?: () => Promise<void> | void
   onMove?: (folder: string) => Promise<void> | void
   onDownloadAttachment?: (attachmentId: string) => Promise<void> | void
+  onReply?: () => Promise<void> | void
 }
 
 const QUICK_MOVE_TARGETS = [
@@ -38,6 +39,7 @@ export function MessageView({
   onSpam,
   onMove,
   onDownloadAttachment,
+  onReply,
 }: MessageViewProps) {
   const formattedDate = message
     ? new Date(message.date).toLocaleString(undefined, {
@@ -147,6 +149,15 @@ export function MessageView({
                       ))}
                     </select>
                   </div>
+                )}
+                {onReply && (
+                  <button
+                    className="rounded-full border border-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.3em] text-accent transition hover:border-accent/60 hover:text-white"
+                    onClick={() => onReply()}
+                    disabled={actionLoading}
+                  >
+                    Reply
+                  </button>
                 )}
               </div>
             )}
