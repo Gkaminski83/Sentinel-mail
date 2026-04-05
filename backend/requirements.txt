@@ -5,3 +5,4 @@ uvicorn
 PyJWT
 cryptography
 bleach
+email-validator
