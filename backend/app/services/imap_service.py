@@ -59,7 +59,7 @@ ALLOWED_HTML_ATTRS = {
     "span": ["style"],
 }
 
-ALLOWED_HTML_PROTOCOLS = ["http", "https", "mailto"]
+ALLOWED_HTML_PROTOCOLS = ["http", "https", "mailto", "cid", "data"]
 
 
 class _HTMLStripper(HTMLParser):
