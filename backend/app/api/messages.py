@@ -70,11 +70,38 @@ def get_messages(
         max_length=200,
         description="Keyword search across subject, sender, snippet, and account name",
     ),
+    sender: str | None = Query(
+        None,
+        min_length=1,
+        max_length=200,
+        description="Filter by sender name or email substring",
+    ),
+    date_from: str | None = Query(
+        None,
+        description="ISO8601 date/time or YYYY-MM-DD to include messages from this date onward",
+    ),
+    date_to: str | None = Query(
+        None,
+        description="ISO8601 date/time or YYYY-MM-DD to include messages up to this date",
+    ),
+    has_attachment: bool | None = Query(
+        None,
+        description="true for messages with attachments, false for messages without, omit for all",
+    ),
     _: str = Depends(get_current_admin),
 ):
     service = IMAPService()
     resolved_folder = _resolve_folder(folder)
-    return service.fetch_latest_emails(limit=limit, folder=resolved_folder, page=page, query=query)
+    return service.fetch_latest_emails(
+        limit=limit,
+        folder=resolved_folder,
+        page=page,
+        query=query,
+        sender=sender,
+        date_from=date_from,
+        date_to=date_to,
+        has_attachment=has_attachment,
+    )
 
 @router.get("/messages/{id}")
 def get_message(id: str, _: str = Depends(get_current_admin)):

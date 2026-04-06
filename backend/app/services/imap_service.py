@@ -2,7 +2,7 @@ import logging
 import re
 from collections import defaultdict
 from contextlib import suppress
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
 from email.header import decode_header, make_header
 from email.policy import default
@@ -163,6 +163,72 @@ def _extract_email_content(raw_bytes: bytes) -> Dict[str, Any]:
     }
 
 
+def _bodystructure_has_attachments(structure: Any) -> bool:
+    if not structure:
+        return False
+
+    def _normalize(value: Any) -> Any:
+        if isinstance(value, bytes):
+            with suppress(Exception):
+                return value.decode(errors="ignore")
+        return value
+
+    def _walk(node: Any) -> bool:
+        node = _normalize(node)
+        if isinstance(node, dict):
+            for child in node.values():
+                if _walk(child):
+                    return True
+            return False
+        if isinstance(node, (list, tuple)):
+            for child in node:
+                if _walk(child):
+                    return True
+            return False
+        if isinstance(node, str):
+            upper = node.upper()
+            if upper in {"ATTACHMENT", "INLINE", "FILENAME", "NAME"}:
+                return True
+        return False
+
+    return _walk(structure)
+
+
+def _ensure_aware_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _parse_date_filter(value: str | None, *, end_of_day: bool = False) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    normalized = normalized.replace("Z", "+00:00")
+    parsed: datetime | None = None
+    with suppress(ValueError):
+        parsed = datetime.fromisoformat(normalized)
+    if parsed is None:
+        with suppress(ValueError):
+            parsed = datetime.strptime(normalized, "%Y-%m-%d")
+    if parsed is None:
+        return None
+    parsed = _ensure_aware_datetime(parsed)
+    if end_of_day:
+        parsed = parsed + timedelta(days=1) - timedelta(microseconds=1)
+    return parsed
+
+
+def _serialize_message_summary(message: Dict[str, Any]) -> Dict[str, Any]:
+    serialized = dict(message)
+    date_value = serialized.get("date")
+    if isinstance(date_value, datetime):
+        serialized["date"] = _ensure_aware_datetime(date_value).isoformat()
+    return serialized
+
+
 class IMAPService:
     def _connect(self, account: Dict[str, Any]):
         client = IMAPClient(
@@ -191,12 +257,19 @@ class IMAPService:
         folder: str = DEFAULT_FOLDER,
         page: int = 1,
         query: str | None = None,
+        sender: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        has_attachment: bool | None = None,
     ) -> Dict[str, Any]:
         accounts = config_service.load_accounts(only_enabled=True)
         all_messages: List[Dict[str, Any]] = []
         failures: List[Dict[str, str]] = []
         normalized_query = query.strip().lower() if query else None
-        per_account_fetch = max(limit * page, limit)
+        sender_filter = sender.strip().lower() if sender else None
+        start_date = _parse_date_filter(date_from)
+        end_date = _parse_date_filter(date_to, end_of_day=True)
+        per_account_fetch = max(limit * (page + 2), limit)
         for account in accounts:
             try:
                 client = self._connect(account)
@@ -208,7 +281,7 @@ class IMAPService:
                 messages = uids[-per_account_fetch:]
                 response = client.fetch(
                     messages,
-                    ["ENVELOPE", "BODY.PEEK[TEXT]<0.200>", "BODY.PEEK[]<0.200>"],
+                    ["ENVELOPE", "BODY.PEEK[TEXT]<0.200>", "BODY.PEEK[]<0.200>", "BODYSTRUCTURE"],
                 )
                 for msgid, data in response.items():
                     envelope = data[b"ENVELOPE"]
@@ -218,12 +291,21 @@ class IMAPService:
                         or data.get(b"BODY[]", b"")
                     )
                     snippet = snippet_bytes.decode(errors="ignore").strip()
+                    structure = data.get(b"BODYSTRUCTURE")
+                    has_attachments = _bodystructure_has_attachments(structure)
                     subject_value = envelope.subject
                     if isinstance(subject_value, bytes):
                         subject_value = subject_value.decode(errors="ignore")
                     subject = str(make_header(decode_header(subject_value))) if subject_value else ""
                     sender = envelope.from_[0]
                     from_addr = f"{sender.mailbox.decode()}@{sender.host.decode()}"
+                    sender_name_value = sender.name
+                    if isinstance(sender_name_value, bytes):
+                        sender_name_value = sender_name_value.decode(errors="ignore")
+                    sender_name = (
+                        str(make_header(decode_header(sender_name_value))) if sender_name_value else ""
+                    )
+                    display_from = f"{sender_name} <{from_addr}>" if sender_name else from_addr
 
                     date_value = envelope.date
                     if isinstance(date_value, bytes):
@@ -236,6 +318,7 @@ class IMAPService:
                     else:
                         # IMAP servers normally return str or datetime; fallback prevents crashes if missing
                         date = datetime.utcnow()
+                    date = _ensure_aware_datetime(date)
                     all_messages.append(
                         {
                             "id": self._encode_message_id(account["id"], folder, msgid),
@@ -243,8 +326,10 @@ class IMAPService:
                             "account": account["name"],
                             "folder": folder,
                             "subject": subject,
-                            "from": from_addr,
-                            "date": date.isoformat(),
+                            "from": display_from,
+                            "from_email": from_addr,
+                            "date": date,
+                            "has_attachments": has_attachments,
                             "snippet": snippet,
                         }
                     )
@@ -265,30 +350,47 @@ class IMAPService:
                     }
                 )
                 continue
-        if normalized_query:
-            def matches_search(message: Dict[str, Any]) -> bool:
-                subject = message.get("subject", "")
-                sender = message.get("from", "")
-                snippet = message.get("snippet", "")
-                account_name = message.get("account", "")
-                haystack = " ".join(filter(None, [subject, sender, snippet, account_name])).lower()
-                return normalized_query in haystack
-
-            all_messages = [message for message in all_messages if matches_search(message)]
-
-        all_messages.sort(key=lambda x: x["date"], reverse=True)
         if not all_messages and failures and accounts:
             failure_strings = ", ".join(
                 f"{failure['account']}: {failure['error']}" for failure in failures
             )
             raise RuntimeError(f"All accounts failed to sync: {failure_strings}")
-        total = len(all_messages)
+        attachment_filter = has_attachment if has_attachment in {True, False} else None
+
+        def matches_filters(message: Dict[str, Any]) -> bool:
+            if start_date and message["date"] < start_date:
+                return False
+            if end_date and message["date"] > end_date:
+                return False
+            if sender_filter:
+                sender_value = " ".join(
+                    filter(None, [message.get("from"), message.get("from_email"), message.get("account")])
+                ).lower()
+                if sender_filter not in sender_value:
+                    return False
+            if attachment_filter is True and not message.get("has_attachments"):
+                return False
+            if attachment_filter is False and message.get("has_attachments"):
+                return False
+            if normalized_query:
+                subject = message.get("subject", "")
+                sender_text = message.get("from", "")
+                snippet = message.get("snippet", "")
+                account_name = message.get("account", "")
+                haystack = " ".join(filter(None, [subject, sender_text, snippet, account_name])).lower()
+                if normalized_query not in haystack:
+                    return False
+            return True
+
+        filtered_messages = [message for message in all_messages if matches_filters(message)]
+        filtered_messages.sort(key=lambda x: x["date"], reverse=True)
+        total = len(filtered_messages)
         start = (page - 1) * limit
         end = start + limit
-        page_items = all_messages[start:end]
+        page_items = filtered_messages[start:end]
         has_next = total > end
         return {
-            "messages": page_items,
+            "messages": [_serialize_message_summary(message) for message in page_items],
             "page": page,
             "page_size": limit,
             "has_next": has_next,

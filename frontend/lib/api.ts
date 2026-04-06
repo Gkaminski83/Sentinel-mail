@@ -36,6 +36,8 @@ export type MessageSummary = {
   folder: string
   subject: string
   from: string
+  from_email?: string
+  has_attachments?: boolean
   date: string
   snippet: string
 }
@@ -202,10 +204,18 @@ type MessageActionInput = {
   message_ids: string[]
 }
 
-export async function getMessages(
-  params?: { folder?: string; limit?: number; page?: number; query?: string },
-  init?: RequestInit,
-): Promise<PaginatedMessagesResponse> {
+type MessageQueryParams = {
+  folder?: string
+  limit?: number
+  page?: number
+  query?: string
+  sender?: string
+  dateFrom?: string
+  dateTo?: string
+  hasAttachment?: boolean
+}
+
+export async function getMessages(params?: MessageQueryParams, init?: RequestInit): Promise<PaginatedMessagesResponse> {
   const searchParams = new URLSearchParams()
   if (params?.folder) {
     searchParams.set("folder", params.folder)
@@ -218,6 +228,18 @@ export async function getMessages(
   }
   if (params?.query) {
     searchParams.set("query", params.query)
+  }
+  if (params?.sender) {
+    searchParams.set("sender", params.sender)
+  }
+  if (params?.dateFrom) {
+    searchParams.set("date_from", params.dateFrom)
+  }
+  if (params?.dateTo) {
+    searchParams.set("date_to", params.dateTo)
+  }
+  if (typeof params?.hasAttachment === "boolean") {
+    searchParams.set("has_attachment", String(params.hasAttachment))
   }
   const query = searchParams.toString()
   const path = query ? `/messages?${query}` : "/messages"
