@@ -1,4 +1,5 @@
 import logging
+import re
 from collections import defaultdict
 from contextlib import suppress
 from datetime import datetime
@@ -61,6 +62,8 @@ ALLOWED_HTML_ATTRS = {
 
 ALLOWED_HTML_PROTOCOLS = ["http", "https", "mailto", "cid", "data"]
 
+_BLOCK_TAG_RE = re.compile(r"<(script|style)[^>]*>.*?<\/\s*\1\s*>", re.IGNORECASE | re.DOTALL)
+
 
 class _HTMLStripper(HTMLParser):
     def __init__(self):
@@ -97,8 +100,9 @@ def _decode_text_part(part) -> str:
 
 
 def _sanitize_html(content: str) -> str:
+    stripped = _BLOCK_TAG_RE.sub("", content)
     return bleach.clean(
-        content,
+        stripped,
         tags=ALLOWED_HTML_TAGS,
         attributes=ALLOWED_HTML_ATTRS,
         protocols=ALLOWED_HTML_PROTOCOLS,
