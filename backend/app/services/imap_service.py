@@ -185,15 +185,27 @@ class IMAPService:
             raise ValueError("Invalid message id")
         return parts[0], parts[1], parts[2]
 
-    def fetch_latest_emails(self, limit: int = 50, folder: str = DEFAULT_FOLDER) -> List[Dict[str, Any]]:
+    def fetch_latest_emails(
+        self,
+        limit: int = 50,
+        folder: str = DEFAULT_FOLDER,
+        page: int = 1,
+        query: str | None = None,
+    ) -> Dict[str, Any]:
         accounts = config_service.load_accounts(only_enabled=True)
         all_messages: List[Dict[str, Any]] = []
         failures: List[Dict[str, str]] = []
+        normalized_query = query.strip().lower() if query else None
+        per_account_fetch = max(limit * page, limit)
         for account in accounts:
             try:
                 client = self._connect(account)
                 client.select_folder(folder)
-                messages = client.search(["ALL"])[-limit:]
+                uids = client.search(["ALL"])
+                if not uids:
+                    client.logout()
+                    continue
+                messages = uids[-per_account_fetch:]
                 response = client.fetch(
                     messages,
                     ["ENVELOPE", "BODY.PEEK[TEXT]<0.200>", "BODY.PEEK[]<0.200>"],
@@ -253,13 +265,35 @@ class IMAPService:
                     }
                 )
                 continue
+        if normalized_query:
+            def matches_search(message: Dict[str, Any]) -> bool:
+                subject = message.get("subject", "")
+                sender = message.get("from", "")
+                snippet = message.get("snippet", "")
+                account_name = message.get("account", "")
+                haystack = " ".join(filter(None, [subject, sender, snippet, account_name])).lower()
+                return normalized_query in haystack
+
+            all_messages = [message for message in all_messages if matches_search(message)]
+
         all_messages.sort(key=lambda x: x["date"], reverse=True)
         if not all_messages and failures and accounts:
             failure_strings = ", ".join(
                 f"{failure['account']}: {failure['error']}" for failure in failures
             )
             raise RuntimeError(f"All accounts failed to sync: {failure_strings}")
-        return all_messages
+        total = len(all_messages)
+        start = (page - 1) * limit
+        end = start + limit
+        page_items = all_messages[start:end]
+        has_next = total > end
+        return {
+            "messages": page_items,
+            "page": page,
+            "page_size": limit,
+            "has_next": has_next,
+            "total": total,
+        }
 
     def fetch_email_body(self, account_id: str, folder: str, msgid: str):
         accounts = config_service.load_accounts()

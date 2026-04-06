@@ -23,6 +23,18 @@ type MessageListProps = {
   actionLoading?: boolean
   actionError?: string | null
   activeFolder: string
+  onCompose?: () => void
+  page: number
+  pageSize: number
+  total: number
+  hasNextPage: boolean
+  onNextPage: () => void
+  onPrevPage: () => void
+  searchValue: string
+  isSearching: boolean
+  onSearchChange: (value: string) => void
+  onSearchSubmit: () => void
+  onSearchClear: () => void
 }
 
 const FOLDER_LABELS: Record<string, string> = {
@@ -51,25 +63,119 @@ export function MessageList({
   actionLoading = false,
   actionError,
   activeFolder,
+  onCompose,
+  page,
+  pageSize,
+  total,
+  hasNextPage,
+  onNextPage,
+  onPrevPage,
+  searchValue,
+  isSearching,
+  onSearchChange,
+  onSearchSubmit,
+  onSearchClear,
 }: MessageListProps) {
   const selectionCount = selectedMessageIds.size
   const toolbarVisible = selectionCount > 0
   const folderLabel = useMemo(() => FOLDER_LABELS[activeFolder] ?? activeFolder, [activeFolder])
+  const showingStart = messages.length > 0 ? (page - 1) * pageSize + 1 : total === 0 ? 0 : (page - 1) * pageSize + 1
+  const showingEnd = messages.length > 0 ? showingStart + messages.length - 1 : showingStart
 
   return (
     <section className="flex h-full w-[400px] flex-col border-r border-white/5 bg-panel/40">
       <header className="flex items-center justify-between border-b border-white/5 px-5 py-4">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-muted">{folderLabel}</p>
-          <h2 className="text-xl font-semibold text-text">{messages.length} conversations</h2>
+          <h2 className="text-xl font-semibold text-text">
+            {total > 0 ? (
+              <span>
+                Showing {showingStart}-{showingEnd} of {total}
+              </span>
+            ) : (
+              "No conversations"
+            )}
+          </h2>
         </div>
-        <button
-          onClick={onRefresh}
-          className="rounded-full border border-white/10 px-4 py-1 text-sm text-text transition hover:border-accent hover:text-accent"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {onCompose && (
+            <button
+              onClick={onCompose}
+              className="rounded-full border border-accent/40 px-4 py-1 text-sm uppercase tracking-[0.3em] text-accent transition hover:border-accent hover:text-white"
+            >
+              Compose
+            </button>
+          )}
+          <button
+            onClick={onRefresh}
+            className="rounded-full border border-white/10 px-4 py-1 text-sm text-text transition hover:border-accent hover:text-accent"
+          >
+            Refresh
+          </button>
+          <div className="flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 text-[11px] uppercase tracking-[0.3em] text-muted">
+            <button
+              onClick={onPrevPage}
+              disabled={loading || page === 1}
+              className="rounded-full px-2 py-0.5 text-text transition enabled:hover:text-white disabled:opacity-40"
+              aria-label="Previous page"
+            >
+              ◀
+            </button>
+            <span className="min-w-[3rem] text-center text-xs text-text">Page {page}</span>
+            <button
+              onClick={onNextPage}
+              disabled={loading || !hasNextPage}
+              className="rounded-full px-2 py-0.5 text-text transition enabled:hover:text-white disabled:opacity-40"
+              aria-label="Next page"
+            >
+              ▶
+            </button>
+          </div>
+        </div>
       </header>
+      <div className="border-b border-white/5 px-5 py-3">
+        <form
+          className="flex items-center gap-2 rounded-full border border-white/10 bg-panel/60 px-3 py-1.5 text-sm text-muted"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSearchSubmit()
+          }}
+        >
+          <span aria-hidden="true" className="text-lg text-white/70">
+            🔍
+          </span>
+          <input
+            type="search"
+            value={searchValue}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search mail"
+            className="flex-1 bg-transparent text-sm text-text placeholder:text-muted focus:outline-none"
+          />
+          {(searchValue.length > 0 || isSearching) && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.preventDefault()
+                onSearchClear()
+              }}
+              className="rounded-full px-2 py-0.5 text-[11px] uppercase tracking-[0.3em] text-muted transition hover:text-white"
+            >
+              Clear
+            </button>
+          )}
+          <button
+            type="submit"
+            className="rounded-full border border-accent/40 px-3 py-0.5 text-[11px] uppercase tracking-[0.3em] text-accent transition hover:border-accent hover:text-white"
+          >
+            Go
+          </button>
+        </form>
+        {isSearching && (
+          <p className="mt-2 text-[11px] uppercase tracking-[0.3em] text-muted">
+            Filtering results for “{searchValue || "current term"}”
+          </p>
+        )}
+      </div>
       {toolbarVisible && (
         <div className="flex flex-wrap items-center gap-2 border-b border-white/5 px-4 py-3 text-xs text-muted">
           <span className="text-text">{selectionCount} selected</span>

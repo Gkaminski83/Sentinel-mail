@@ -55,6 +55,14 @@ export type MessageDetail = {
   attachments: AttachmentSummary[]
 }
 
+type PaginatedMessagesResponse = {
+  messages: MessageSummary[]
+  page: number
+  page_size: number
+  has_next: boolean
+  total: number
+}
+
 export type RecipientInput = {
   email: string
   name?: string | null
@@ -195,9 +203,9 @@ type MessageActionInput = {
 }
 
 export async function getMessages(
-  params?: { folder?: string; limit?: number },
+  params?: { folder?: string; limit?: number; page?: number; query?: string },
   init?: RequestInit,
-): Promise<MessageSummary[]> {
+): Promise<PaginatedMessagesResponse> {
   const searchParams = new URLSearchParams()
   if (params?.folder) {
     searchParams.set("folder", params.folder)
@@ -205,9 +213,15 @@ export async function getMessages(
   if (params?.limit) {
     searchParams.set("limit", String(params.limit))
   }
+  if (params?.page) {
+    searchParams.set("page", String(params.page))
+  }
+  if (params?.query) {
+    searchParams.set("query", params.query)
+  }
   const query = searchParams.toString()
   const path = query ? `/messages?${query}` : "/messages"
-  return fetchJson<MessageSummary[]>(path, init)
+  return fetchJson<PaginatedMessagesResponse>(path, init)
 }
 
 export async function getMessageBody(id: string, init?: RequestInit): Promise<MessageDetail> {

@@ -27,7 +27,7 @@
 | Account filtering of messages | ✅ | Filters by selected account email. |
 | Auto-refresh / manual refresh control | ✅ | Refresh button triggers `getMessages()`. |
 | Loading + error states across list/view | ✅ | Implemented across components. |
-| Pagination / infinite scroll | ⬜ | List currently loads last batch only. |
+| Pagination / infinite scroll | ✅ | Server-side pagination with prev/next controls, totals, and query params. |
 | Threaded conversation view | ⬜ | Not implemented. |
 | Rich rendering of attachments / inline images | 🟡 | HTML body rendering + attachment list/download shipped; inline images still pending. |
 
@@ -44,7 +44,7 @@
 ## 4. Search, Filtering & Organization
 | Feature | Status | Notes |
 | --- | --- | --- |
-| Keyword search (server-side or local) | ⬜ | Not implemented. |
+| Keyword search (server-side or local) | ✅ | Backend filters subject/sender/snippet/account; UI exposes search bar. |
 | Advanced filters (date, sender, has attachment) | ⬜ | Not implemented. |
 | Labels / tags | ⬜ | Not implemented. |
 | Rules / automations (move, mark, notify) | ⬜ | Not implemented. |

@@ -26,6 +26,7 @@ import {
 import { clearAuthToken, getAuthToken } from "@/lib/auth"
 
 const COMPOSE_DRAFT_STORAGE_KEY = "sentinel_compose_draft"
+const MESSAGE_PAGE_SIZE = 50
 
 type StoredComposeDraft = Partial<Omit<ComposeDraft, "attachments">> & {
   attachments?: Partial<AttachmentDraft>[] | null
@@ -80,6 +81,11 @@ export default function HomePage() {
   const [messages, setMessages] = useState<MessageSummary[]>([])
   const [messagesLoading, setMessagesLoading] = useState(true)
   const [messagesError, setMessagesError] = useState<string | null>(null)
+  const [messagePage, setMessagePage] = useState(1)
+  const [messagesHasNextPage, setMessagesHasNextPage] = useState(false)
+  const [messagesTotal, setMessagesTotal] = useState(0)
+  const [messageSearchInput, setMessageSearchInput] = useState("")
+  const [messageSearchQuery, setMessageSearchQuery] = useState<string | null>(null)
   const [messageActionLoading, setMessageActionLoading] = useState(false)
   const [messageActionError, setMessageActionError] = useState<string | null>(null)
 
@@ -172,11 +178,18 @@ export default function HomePage() {
     setMessagesLoading(true)
     setMessagesError(null)
     try {
-      const data = await getMessages({ folder: activeFolder })
-      setMessages(data)
+      const response = await getMessages({
+        folder: activeFolder,
+        page: messagePage,
+        limit: MESSAGE_PAGE_SIZE,
+        ...(messageSearchQuery ? { query: messageSearchQuery } : {}),
+      })
+      setMessages(response.messages)
+      setMessagesHasNextPage(response.has_next)
+      setMessagesTotal(response.total)
       setReadMessageIds((prev) => {
         const next = new Set<string>()
-        data.forEach((message) => {
+        response.messages.forEach((message) => {
           if (prev.has(message.id)) {
             next.add(message.id)
           }
@@ -191,7 +204,7 @@ export default function HomePage() {
     } finally {
       setMessagesLoading(false)
     }
-  }, [handleAuthError, activeFolder])
+  }, [handleAuthError, activeFolder, messagePage, messageSearchQuery])
 
   useEffect(() => {
     const token = getAuthToken()
@@ -296,6 +309,8 @@ export default function HomePage() {
     return unread
   }, [messages, readMessageIds])
 
+  const searchActive = useMemo(() => Boolean(messageSearchQuery && messageSearchQuery.length > 0), [messageSearchQuery])
+
   const handleSelectMessage = useCallback((messageId: string) => {
     setSelectedMessageId(messageId)
     setReadMessageIds((prev) => {
@@ -310,17 +325,50 @@ export default function HomePage() {
 
   const handleAccountFilterChange = useCallback((accountId: string) => {
     setActiveAccountFilter(accountId)
+    setMessagePage(1)
   }, [])
 
   const handleFolderChange = useCallback((folderId: string) => {
     setActiveFolder(folderId)
+    setMessagePage(1)
     setSelectedMessageIds(new Set())
     setSelectedMessageId(null)
+  }, [])
+
+  const handleSearchInputChange = useCallback((value: string) => {
+    setMessageSearchInput(value)
+  }, [])
+
+  const handleSearchSubmit = useCallback(() => {
+    const trimmed = messageSearchInput.trim()
+    setMessagePage(1)
+    setMessageSearchQuery(trimmed.length > 0 ? trimmed : null)
+    setMessageSearchInput(trimmed)
+  }, [messageSearchInput])
+
+  const handleSearchClear = useCallback(() => {
+    setMessageSearchInput("")
+    setMessagePage(1)
+    setMessageSearchQuery(null)
   }, [])
 
   const handleRefresh = useCallback(() => {
     loadMessages()
   }, [loadMessages])
+
+  const handleNextPage = useCallback(() => {
+    if (!messagesHasNextPage || messagesLoading) {
+      return
+    }
+    setMessagePage((prev) => prev + 1)
+  }, [messagesHasNextPage, messagesLoading])
+
+  const handlePrevPage = useCallback(() => {
+    if (messagePage === 1 || messagesLoading) {
+      return
+    }
+    setMessagePage((prev) => Math.max(1, prev - 1))
+  }, [messagePage, messagesLoading])
 
   const handleLogout = useCallback(() => {
     clearAuthToken()
@@ -590,6 +638,44 @@ export default function HomePage() {
     [handleAuthError, selectedMessageId],
   )
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Delete" || messageActionLoading) {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+      if (target) {
+        const tagName = target.tagName
+        const isEditable =
+          target.isContentEditable || tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT"
+        if (isEditable) {
+          return
+        }
+      }
+
+      if (composeOpen) {
+        return
+      }
+
+      const ids =
+        selectedMessageIds.size > 0
+          ? Array.from(selectedMessageIds)
+          : selectedMessageId
+            ? [selectedMessageId]
+            : []
+      if (ids.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      handleBulkDelete({ ids, permanent: activeFolder === "trash" })
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [activeFolder, composeOpen, handleBulkDelete, messageActionLoading, selectedMessageId, selectedMessageIds])
+
   if (!authChecked) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background text-muted">
@@ -631,6 +717,18 @@ export default function HomePage() {
           actionLoading={messageActionLoading}
           actionError={messageActionError}
           activeFolder={activeFolder}
+          page={messagePage}
+          hasNextPage={messagesHasNextPage}
+          total={messagesTotal}
+          onNextPage={handleNextPage}
+          onPrevPage={handlePrevPage}
+          pageSize={MESSAGE_PAGE_SIZE}
+          searchValue={messageSearchInput}
+          isSearching={searchActive}
+          onSearchChange={handleSearchInputChange}
+          onSearchSubmit={handleSearchSubmit}
+          onSearchClear={handleSearchClear}
+          onCompose={openCompose}
         />
         <MessageView
           message={selectedMessage}

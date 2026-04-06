@@ -63,11 +63,18 @@ class SendEmailRequest(BaseModel):
 def get_messages(
     folder: str | None = Query(None, description="Folder alias or IMAP folder name"),
     limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1),
+    query: str | None = Query(
+        None,
+        min_length=1,
+        max_length=200,
+        description="Keyword search across subject, sender, snippet, and account name",
+    ),
     _: str = Depends(get_current_admin),
 ):
     service = IMAPService()
     resolved_folder = _resolve_folder(folder)
-    return service.fetch_latest_emails(limit=limit, folder=resolved_folder)
+    return service.fetch_latest_emails(limit=limit, folder=resolved_folder, page=page, query=query)
 
 @router.get("/messages/{id}")
 def get_message(id: str, _: str = Depends(get_current_admin)):
