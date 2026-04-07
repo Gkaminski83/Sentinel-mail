@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 
 import { MessageSummary } from "@/lib/api"
 import { MessageItem } from "@/components/message-item"
@@ -97,6 +97,8 @@ export function MessageList({
   const folderLabel = useMemo(() => FOLDER_LABELS[activeFolder] ?? activeFolder, [activeFolder])
   const showingStart = messages.length > 0 ? (page - 1) * pageSize + 1 : total === 0 ? 0 : (page - 1) * pageSize + 1
   const showingEnd = messages.length > 0 ? showingStart + messages.length - 1 : showingStart
+  const [keywordFocused, setKeywordFocused] = useState(false)
+  const showAdvancedFilters = keywordFocused || filtersActive
 
   return (
     <section className="flex h-full w-[400px] flex-col border-r border-white/5 bg-panel/40">
@@ -167,75 +169,80 @@ export function MessageList({
                 type="search"
                 value={keywordValue}
                 onChange={(event) => onKeywordChange(event.target.value)}
+                onFocus={() => setKeywordFocused(true)}
                 placeholder="Search subject, sender, snippet…"
                 className="flex-1 bg-transparent text-sm text-text placeholder:text-muted focus:outline-none"
               />
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 text-text sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Sender</label>
-              <input
-                type="text"
-                value={senderValue}
-                onChange={(event) => onSenderChange(event.target.value)}
-                placeholder="Name or email"
-                className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text placeholder:text-muted focus:outline-none"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Attachments</label>
-              <select
-                value={attachmentValue}
-                onChange={(event) => onAttachmentChange(event.target.value as "any" | "with" | "without")}
-                className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text focus:outline-none"
-              >
-                <option value="any">Any</option>
-                <option value="with">With attachments</option>
-                <option value="without">Without attachments</option>
-              </select>
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Date from</label>
-              <input
-                type="date"
-                value={dateFromValue}
-                onChange={(event) => onDateFromChange(event.target.value)}
-                className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text focus:outline-none"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Date to</label>
-              <input
-                type="date"
-                value={dateToValue}
-                onChange={(event) => onDateToChange(event.target.value)}
-                className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text focus:outline-none"
-              />
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            {filtersActive ? (
-              <p className="text-[11px] uppercase tracking-[0.3em] text-muted">Filters applied</p>
-            ) : (
-              <p className="text-[11px] uppercase tracking-[0.3em] text-muted">No filters applied</p>
-            )}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={onFiltersClear}
-                className="rounded-full border border-white/10 px-4 py-1 text-[11px] uppercase tracking-[0.3em] text-muted transition hover:border-white/30 hover:text-white"
-              >
-                Reset
-              </button>
-              <button
-                type="submit"
-                className="rounded-full border border-accent/40 px-4 py-1 text-[11px] uppercase tracking-[0.3em] text-accent transition hover:border-accent hover:text-white"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
+          {showAdvancedFilters && (
+            <>
+              <div className="grid grid-cols-1 gap-3 text-text sm:grid-cols-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Sender</label>
+                  <input
+                    type="text"
+                    value={senderValue}
+                    onChange={(event) => onSenderChange(event.target.value)}
+                    placeholder="Name or email"
+                    className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text placeholder:text-muted focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Attachments</label>
+                  <select
+                    value={attachmentValue}
+                    onChange={(event) => onAttachmentChange(event.target.value as "any" | "with" | "without")}
+                    className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text focus:outline-none"
+                  >
+                    <option value="any">Any</option>
+                    <option value="with">With attachments</option>
+                    <option value="without">Without attachments</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Date from</label>
+                  <input
+                    type="date"
+                    value={dateFromValue}
+                    onChange={(event) => onDateFromChange(event.target.value)}
+                    className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] uppercase tracking-[0.3em] text-muted">Date to</label>
+                  <input
+                    type="date"
+                    value={dateToValue}
+                    onChange={(event) => onDateToChange(event.target.value)}
+                    className="rounded-2xl border border-white/10 bg-black/10 px-3 py-1.5 text-sm text-text focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {filtersActive ? (
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-muted">Filters applied</p>
+                ) : (
+                  <p className="text-[11px] uppercase tracking-[0.3em] text-muted">No filters applied</p>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={onFiltersClear}
+                    className="rounded-full border border-white/10 px-4 py-1 text-[11px] uppercase tracking-[0.3em] text-muted transition hover:border-white/30 hover:text-white"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-full border border-accent/40 px-4 py-1 text-[11px] uppercase tracking-[0.3em] text-accent transition hover:border-accent hover:text-white"
+                  >
+                    Apply
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </form>
       </div>
       {toolbarVisible && (

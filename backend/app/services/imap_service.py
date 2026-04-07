@@ -325,11 +325,26 @@ class IMAPService:
                     if isinstance(subject_value, bytes):
                         subject_value = subject_value.decode(errors="ignore")
                     subject = str(make_header(decode_header(subject_value))) if subject_value else ""
-                    sender = envelope.from_[0]
-                    from_addr = f"{sender.mailbox.decode()}@{sender.host.decode()}"
-                    sender_name_value = sender.name
-                    if isinstance(sender_name_value, bytes):
-                        sender_name_value = sender_name_value.decode(errors="ignore")
+                    sender_entry = None
+                    for address_list in (envelope.from_, envelope.sender, envelope.reply_to):
+                        if address_list:
+                            sender_entry = address_list[0]
+                            break
+
+                    sender_name_value = None
+                    if sender_entry is not None:
+                        sender_name_value = sender_entry.name
+                        if isinstance(sender_name_value, bytes):
+                            sender_name_value = sender_name_value.decode(errors="ignore")
+
+                        mailbox = _decode_bytes(getattr(sender_entry, "mailbox", None))
+                        host = _decode_bytes(getattr(sender_entry, "host", None))
+                        if mailbox and host:
+                            from_addr = f"{mailbox}@{host}"
+                        else:
+                            from_addr = mailbox or host or account.get("email") or account.get("username") or "unknown"
+                    else:
+                        from_addr = account.get("email") or account.get("username") or "unknown"
                     sender_name = (
                         str(make_header(decode_header(sender_name_value))) if sender_name_value else ""
                     )
