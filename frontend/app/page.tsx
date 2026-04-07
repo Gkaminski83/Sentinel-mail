@@ -84,8 +84,16 @@ export default function HomePage() {
   const [messagePage, setMessagePage] = useState(1)
   const [messagesHasNextPage, setMessagesHasNextPage] = useState(false)
   const [messagesTotal, setMessagesTotal] = useState(0)
-  const [messageSearchInput, setMessageSearchInput] = useState("")
-  const [messageSearchQuery, setMessageSearchQuery] = useState<string | null>(null)
+  const [filterKeywordInput, setFilterKeywordInput] = useState("")
+  const [filterSenderInput, setFilterSenderInput] = useState("")
+  const [filterDateFromInput, setFilterDateFromInput] = useState("")
+  const [filterDateToInput, setFilterDateToInput] = useState("")
+  const [filterAttachmentInput, setFilterAttachmentInput] = useState<"any" | "with" | "without">("any")
+  const [filterKeyword, setFilterKeyword] = useState<string | null>(null)
+  const [filterSender, setFilterSender] = useState<string | null>(null)
+  const [filterDateFrom, setFilterDateFrom] = useState<string | null>(null)
+  const [filterDateTo, setFilterDateTo] = useState<string | null>(null)
+  const [filterAttachment, setFilterAttachment] = useState<"any" | "with" | "without">("any")
   const [messageActionLoading, setMessageActionLoading] = useState(false)
   const [messageActionError, setMessageActionError] = useState<string | null>(null)
 
@@ -182,7 +190,15 @@ export default function HomePage() {
         folder: activeFolder,
         page: messagePage,
         limit: MESSAGE_PAGE_SIZE,
-        ...(messageSearchQuery ? { query: messageSearchQuery } : {}),
+        ...(filterKeyword ? { query: filterKeyword } : {}),
+        ...(filterSender ? { sender: filterSender } : {}),
+        ...(filterDateFrom ? { dateFrom: filterDateFrom } : {}),
+        ...(filterDateTo ? { dateTo: filterDateTo } : {}),
+        ...(filterAttachment === "with"
+          ? { hasAttachment: true }
+          : filterAttachment === "without"
+            ? { hasAttachment: false }
+            : {}),
       })
       setMessages(response.messages)
       setMessagesHasNextPage(response.has_next)
@@ -204,7 +220,7 @@ export default function HomePage() {
     } finally {
       setMessagesLoading(false)
     }
-  }, [handleAuthError, activeFolder, messagePage, messageSearchQuery])
+  }, [handleAuthError, activeFolder, messagePage, filterAttachment, filterDateFrom, filterDateTo, filterKeyword, filterSender])
 
   useEffect(() => {
     const token = getAuthToken()
@@ -309,7 +325,17 @@ export default function HomePage() {
     return unread
   }, [messages, readMessageIds])
 
-  const searchActive = useMemo(() => Boolean(messageSearchQuery && messageSearchQuery.length > 0), [messageSearchQuery])
+  const filtersActive = useMemo(
+    () =>
+      Boolean(
+        (filterKeyword && filterKeyword.length > 0) ||
+          (filterSender && filterSender.length > 0) ||
+          (filterDateFrom && filterDateFrom.length > 0) ||
+          (filterDateTo && filterDateTo.length > 0) ||
+          filterAttachment !== "any",
+      ),
+    [filterAttachment, filterDateFrom, filterDateTo, filterKeyword, filterSender],
+  )
 
   const handleSelectMessage = useCallback((messageId: string) => {
     setSelectedMessageId(messageId)
@@ -335,21 +361,49 @@ export default function HomePage() {
     setSelectedMessageId(null)
   }, [])
 
-  const handleSearchInputChange = useCallback((value: string) => {
-    setMessageSearchInput(value)
+  const handleKeywordChange = useCallback((value: string) => {
+    setFilterKeywordInput(value)
   }, [])
 
-  const handleSearchSubmit = useCallback(() => {
-    const trimmed = messageSearchInput.trim()
-    setMessagePage(1)
-    setMessageSearchQuery(trimmed.length > 0 ? trimmed : null)
-    setMessageSearchInput(trimmed)
-  }, [messageSearchInput])
+  const handleSenderChange = useCallback((value: string) => {
+    setFilterSenderInput(value)
+  }, [])
 
-  const handleSearchClear = useCallback(() => {
-    setMessageSearchInput("")
+  const handleDateFromChange = useCallback((value: string) => {
+    setFilterDateFromInput(value)
+  }, [])
+
+  const handleDateToChange = useCallback((value: string) => {
+    setFilterDateToInput(value)
+  }, [])
+
+  const handleAttachmentChange = useCallback((value: "any" | "with" | "without") => {
+    setFilterAttachmentInput(value)
+  }, [])
+
+  const handleFiltersSubmit = useCallback(() => {
+    const keyword = filterKeywordInput.trim()
+    const sender = filterSenderInput.trim()
     setMessagePage(1)
-    setMessageSearchQuery(null)
+    setFilterKeyword(keyword.length > 0 ? keyword : null)
+    setFilterSender(sender.length > 0 ? sender : null)
+    setFilterDateFrom(filterDateFromInput || null)
+    setFilterDateTo(filterDateToInput || null)
+    setFilterAttachment(filterAttachmentInput)
+  }, [filterAttachmentInput, filterDateFromInput, filterDateToInput, filterKeywordInput, filterSenderInput])
+
+  const handleFiltersClear = useCallback(() => {
+    setFilterKeywordInput("")
+    setFilterSenderInput("")
+    setFilterDateFromInput("")
+    setFilterDateToInput("")
+    setFilterAttachmentInput("any")
+    setMessagePage(1)
+    setFilterKeyword(null)
+    setFilterSender(null)
+    setFilterDateFrom(null)
+    setFilterDateTo(null)
+    setFilterAttachment("any")
   }, [])
 
   const handleRefresh = useCallback(() => {
@@ -723,11 +777,19 @@ export default function HomePage() {
           onNextPage={handleNextPage}
           onPrevPage={handlePrevPage}
           pageSize={MESSAGE_PAGE_SIZE}
-          searchValue={messageSearchInput}
-          isSearching={searchActive}
-          onSearchChange={handleSearchInputChange}
-          onSearchSubmit={handleSearchSubmit}
-          onSearchClear={handleSearchClear}
+          keywordValue={filterKeywordInput}
+          senderValue={filterSenderInput}
+          dateFromValue={filterDateFromInput}
+          dateToValue={filterDateToInput}
+          attachmentValue={filterAttachmentInput}
+          filtersActive={filtersActive}
+          onKeywordChange={handleKeywordChange}
+          onSenderChange={handleSenderChange}
+          onDateFromChange={handleDateFromChange}
+          onDateToChange={handleDateToChange}
+          onAttachmentChange={handleAttachmentChange}
+          onFiltersSubmit={handleFiltersSubmit}
+          onFiltersClear={handleFiltersClear}
           onCompose={openCompose}
         />
         <MessageView
