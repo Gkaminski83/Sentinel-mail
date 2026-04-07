@@ -155,6 +155,13 @@ export function ComposePanel({
     setLocalError(null)
   }
 
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    onDraftChange?.(draft)
+  }, [draft, onDraftChange, open])
+
   if (!open) {
     return null
   }
@@ -176,13 +183,6 @@ export function ComposePanel({
   const updateField = (field: keyof ComposeDraft, value: string) => {
     setDraft((prev) => ({ ...prev, [field]: value }))
   }
-
-  useEffect(() => {
-    if (!open) {
-      return
-    }
-    onDraftChange?.(draft)
-  }, [draft, onDraftChange, open])
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 px-4 py-8 backdrop-blur-md">
