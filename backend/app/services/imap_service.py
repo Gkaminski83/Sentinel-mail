@@ -349,9 +349,9 @@ class IMAPService:
                         str(make_header(decode_header(sender_name_value))) if sender_name_value else ""
                     )
                     display_from = f"{sender_name} <{from_addr}>" if sender_name else from_addr
-                    message_id_header = _decode_bytes(envelope.message_id)
-                    in_reply_to = _decode_bytes(envelope.in_reply_to)
-                    references = _decode_references(envelope.references)
+                    message_id_header = _decode_bytes(getattr(envelope, "message_id", None))
+                    in_reply_to = _decode_bytes(getattr(envelope, "in_reply_to", None))
+                    references = _decode_references(getattr(envelope, "references", None))
 
                     thread_candidates = [references[0] if references else None, in_reply_to, message_id_header]
                     thread_id = next((candidate for candidate in thread_candidates if candidate), None)
