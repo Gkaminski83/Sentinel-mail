@@ -1,6 +1,6 @@
 import logging
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
@@ -194,6 +194,34 @@ def _bodystructure_has_attachments(structure: Any) -> bool:
     return _walk(structure)
 
 
+def _decode_bytes(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        with suppress(Exception):
+            return value.decode(errors="ignore").strip()
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
+def _decode_references(raw_references: Any) -> List[str]:
+    if not raw_references:
+        return []
+    if isinstance(raw_references, (list, tuple)):
+        values = raw_references
+    else:
+        values = [raw_references]
+    decoded: List[str] = []
+    for ref in values:
+        decoded_value = _decode_bytes(ref)
+        if decoded_value:
+            decoded.append(decoded_value)
+    return decoded
+
+
 def _ensure_aware_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -306,6 +334,12 @@ class IMAPService:
                         str(make_header(decode_header(sender_name_value))) if sender_name_value else ""
                     )
                     display_from = f"{sender_name} <{from_addr}>" if sender_name else from_addr
+                    message_id_header = _decode_bytes(envelope.message_id)
+                    in_reply_to = _decode_bytes(envelope.in_reply_to)
+                    references = _decode_references(envelope.references)
+
+                    thread_candidates = [references[0] if references else None, in_reply_to, message_id_header]
+                    thread_id = next((candidate for candidate in thread_candidates if candidate), None)
 
                     date_value = envelope.date
                     if isinstance(date_value, bytes):
@@ -319,9 +353,11 @@ class IMAPService:
                         # IMAP servers normally return str or datetime; fallback prevents crashes if missing
                         date = datetime.utcnow()
                     date = _ensure_aware_datetime(date)
+                    encoded_id = self._encode_message_id(account["id"], folder, msgid)
+                    normalized_thread_id = thread_id or message_id_header or encoded_id
                     all_messages.append(
                         {
-                            "id": self._encode_message_id(account["id"], folder, msgid),
+                            "id": encoded_id,
                             "account_id": account["id"],
                             "account": account["name"],
                             "folder": folder,
@@ -330,6 +366,8 @@ class IMAPService:
                             "from_email": from_addr,
                             "date": date,
                             "has_attachments": has_attachments,
+                            "message_id_header": message_id_header,
+                            "thread_id": normalized_thread_id,
                             "snippet": snippet,
                         }
                     )
@@ -384,6 +422,9 @@ class IMAPService:
 
         filtered_messages = [message for message in all_messages if matches_filters(message)]
         filtered_messages.sort(key=lambda x: x["date"], reverse=True)
+        thread_sizes = Counter(message["thread_id"] for message in filtered_messages)
+        for message in filtered_messages:
+            message["thread_size"] = thread_sizes.get(message["thread_id"], 1)
         total = len(filtered_messages)
         start = (page - 1) * limit
         end = start + limit

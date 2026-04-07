@@ -28,6 +28,9 @@ export function MessageItem({
     hour: "2-digit",
     minute: "2-digit",
   })
+  const threadSize = message.thread_size ?? 1
+  const hasThread = threadSize > 1
+  const hasAttachment = Boolean(message.has_attachments)
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>) => {
     if (!draggableIds || draggableIds.length === 0) {
@@ -81,6 +84,20 @@ export function MessageItem({
         {unread && <span className="h-2 w-2 rounded-full bg-accent" aria-hidden />}
       </div>
       <p className="mt-1 text-sm text-muted line-clamp-1">{message.snippet || "No preview available"}</p>
+      {(hasThread || hasAttachment) && (
+        <div className="mt-3 flex items-center gap-3 text-xs text-muted">
+          {hasThread && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 text-[11px] uppercase tracking-[0.3em] text-text">
+              {threadSize} msgs
+            </span>
+          )}
+          {hasAttachment && (
+            <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-[0.3em] text-muted">
+              📎 Attachments
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

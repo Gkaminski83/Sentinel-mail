@@ -38,6 +38,8 @@ export type MessageSummary = {
   from: string
   from_email?: string
   has_attachments?: boolean
+  thread_id?: string | null
+  thread_size?: number
   date: string
   snippet: string
 }
