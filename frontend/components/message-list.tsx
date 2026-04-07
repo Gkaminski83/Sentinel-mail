@@ -43,6 +43,7 @@ type MessageListProps = {
   onAttachmentChange: (value: "any" | "with" | "without") => void
   onFiltersSubmit: () => void
   onFiltersClear: () => void
+  width?: number
 }
 
 const FOLDER_LABELS: Record<string, string> = {
@@ -91,6 +92,7 @@ export function MessageList({
   onAttachmentChange,
   onFiltersSubmit,
   onFiltersClear,
+  width,
 }: MessageListProps) {
   const selectionCount = selectedMessageIds.size
   const toolbarVisible = selectionCount > 0
@@ -101,7 +103,10 @@ export function MessageList({
   const showAdvancedFilters = keywordFocused || filtersActive
 
   return (
-    <section className="flex h-full w-[400px] flex-col border-r border-white/5 bg-panel/40">
+    <section
+      className="flex h-full min-w-[320px] max-w-[640px] flex-shrink-0 flex-col border-r border-white/5 bg-panel/40"
+      style={width ? { width } : undefined}
+    >
       <header className="flex items-center justify-between border-b border-white/5 px-5 py-4">
         <div>
           <p className="text-xs uppercase tracking-[0.3em] text-muted">{folderLabel}</p>

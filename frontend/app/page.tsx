@@ -1,7 +1,8 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { PointerEvent as ReactPointerEvent } from "react"
 
 import { MessageList } from "@/components/message-list"
 import { MessageView } from "@/components/message-view"
@@ -115,6 +116,11 @@ export default function HomePage() {
   const [composeError, setComposeError] = useState<string | null>(null)
   const [composeSending, setComposeSending] = useState(false)
   const [composeDraft, setComposeDraft] = useState<ComposeDraft | null>(null)
+  const [messageListWidth, setMessageListWidth] = useState(420)
+  const listResizeActiveRef = useRef(false)
+  const listResizeStartXRef = useRef(0)
+  const listResizeStartWidthRef = useRef(420)
+  const [isListResizing, setIsListResizing] = useState(false)
 
   const loadStoredComposeDraft = useCallback(() => {
     if (typeof window === "undefined") {
@@ -577,6 +583,43 @@ export default function HomePage() {
     setAttachmentError(null)
   }, [selectedMessageId])
 
+  const handleListResizePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      event.preventDefault()
+      listResizeActiveRef.current = true
+      listResizeStartXRef.current = event.clientX
+      listResizeStartWidthRef.current = messageListWidth
+      setIsListResizing(true)
+    },
+    [messageListWidth],
+  )
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!listResizeActiveRef.current) {
+        return
+      }
+      const delta = event.clientX - listResizeStartXRef.current
+      const nextWidth = Math.min(640, Math.max(320, listResizeStartWidthRef.current + delta))
+      setMessageListWidth(nextWidth)
+    }
+
+    const handlePointerUp = () => {
+      if (!listResizeActiveRef.current) {
+        return
+      }
+      listResizeActiveRef.current = false
+      setIsListResizing(false)
+    }
+
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", handlePointerUp)
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerUp)
+    }
+  }, [])
+
   const openCompose = useCallback(() => {
     setComposeDraft(loadStoredComposeDraft())
     setComposeError(null)
@@ -791,7 +834,17 @@ export default function HomePage() {
           onFiltersSubmit={handleFiltersSubmit}
           onFiltersClear={handleFiltersClear}
           onCompose={openCompose}
+          width={messageListWidth}
         />
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize message list pane"
+          onPointerDown={handleListResizePointerDown}
+          className={`flex h-full w-3 flex-shrink-0 cursor-col-resize select-none items-center justify-center border-r border-white/5 transition-colors ${isListResizing ? "bg-accent/20" : "bg-transparent"}`}
+        >
+          <span className="h-12 w-px rounded-full bg-white/20" />
+        </div>
         <MessageView
           message={selectedMessage}
           detail={selectedMessageDetail}
